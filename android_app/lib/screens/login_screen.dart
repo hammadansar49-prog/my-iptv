@@ -22,6 +22,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   final m3uUrlCtrl = TextEditingController();
 
   bool loading = false;
+  bool showPassword = false;
   String? error;
 
   @override
@@ -133,7 +134,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             const SizedBox(height: 10),
                             _field(userCtrl, 'Username', 'Username'),
                             const SizedBox(height: 10),
-                            _field(passCtrl, 'Password', 'Password', obscure: true),
+                            _field(passCtrl, 'Password', 'Password', obscure: !showPassword, isPassword: true),
                           ],
                         ),
                         Column(
@@ -195,12 +196,23 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     );
   }
 
-  Widget _field(TextEditingController c, String label, String hint, {bool obscure = false}) {
+  Widget _field(TextEditingController c, String label, String hint, {bool obscure = false, bool isPassword = false}) {
     return TextField(
       controller: c,
       obscureText: obscure,
       style: const TextStyle(fontSize: 13),
-      decoration: InputDecoration(labelText: label, hintText: hint, isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        suffixIcon: isPassword
+            ? IconButton(
+                icon: Icon(showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18, color: AppColors.textDim),
+                onPressed: () => setState(() => showPassword = !showPassword),
+              )
+            : null,
+      ),
     );
   }
 }

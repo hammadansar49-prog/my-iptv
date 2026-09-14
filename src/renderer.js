@@ -456,6 +456,14 @@ async function loadItemsForCategory(catId) {
   }
 
   setGridLoading();
+  // #item-grid (where setGridLoading writes) is hidden while browsing Live
+  // TV — without this, picking a new category left the OLD channel list
+  // sitting there with no sign anything was happening until the fetch
+  // finished, which read as "categories don't work".
+  if (section === 'live') {
+    const list = $('#live-list');
+    if (list) list.innerHTML = '<div class="loading-state"><div class="spinner"></div><div>Loading...</div></div>';
+  }
   try {
     let items;
     if (!state.client) {
@@ -2090,6 +2098,10 @@ function fullscreenStateHandler(status, extra) {
   } else if (status === 'error:final') {
     el.classList.add('show');
     el.innerHTML = `<div>${escapeHtml(extra || 'This stream could not be played.')}  —  tap Back and try again.</div>`;
+  } else if (status === 'no-audio') {
+    // The picture is fine — only tell the user, don't cover the video the
+    // way an error would.
+    toast(extra || 'This channel appears to have no audio in the broadcast.');
   }
 }
 
@@ -2103,6 +2115,8 @@ function inlineLiveStateHandler(status, extra) {
   } else if (status === 'error:final') {
     el.hidden = false;
     el.textContent = extra || 'This channel could not be played.';
+  } else if (status === 'no-audio') {
+    toast(extra || 'This channel appears to have no audio in the broadcast.');
   }
 }
 
@@ -2176,6 +2190,18 @@ async function initPlayer() {
   });
 
   let _bufferPollTimer = null;
+  // ---- White "buffered" line on the seek bar — DO NOT weaken this logic ----
+  //
+  // This has broken twice before, both times the same way: something upstream
+  // (MSE splicing several fetches together, or a proxied stream restarting)
+  // leaves `video.buffered` holding many tiny, almost-touching ranges instead
+  // of one clean span, and the bar renders as a row of slivers instead of a
+  // solid line — which reads as "buffered range not working" even though the
+  // data is technically all there. The fix is always the same: coalesce
+  // ranges that are within a hair of each other before drawing, not to
+  // "simplify" the drawing loop itself. If this ever needs touching again,
+  // keep the merge step — dropping it is what caused the regressions.
+  //
   // Draws every buffered span, not just one bar up to the playhead. What the
   // player holds IS the region a seek lands in without any wait, so showing
   // it exactly tells you how far ahead you can jump for free — and after a
@@ -2186,16 +2212,33 @@ async function initPlayer() {
     if (!isFinite(dur) || dur <= 0) { host.innerHTML = ''; return; }
 
     const offset = (player && player._seekOffset) || 0;
-    const spans = [];
+    const raw = [];
     for (let i = 0; i < video.buffered.length; i++) {
       const from = offset + video.buffered.start(i);
       const to = offset + video.buffered.end(i);
       if (to <= from) continue;
-      spans.push([Math.max(0, from / dur) * 100, Math.min(100, to / dur) * 100]);
+      raw.push([from, to]);
+    }
+    raw.sort((a, b) => a[0] - b[0]);
+
+    // A gap under ~1.5s (or 0.5% of the film, whichever is bigger) is a
+    // seam between two fetches, not a real hole in what's downloaded —
+    // merging those is what keeps the bar one solid line instead of a
+    // strip of slivers.
+    const mergeGap = Math.max(1.5, dur * 0.005);
+    const merged = [];
+    for (const [from, to] of raw) {
+      const last = merged[merged.length - 1];
+      if (last && from - last[1] <= mergeGap) last[1] = Math.max(last[1], to);
+      else merged.push([from, to]);
     }
 
-    host.innerHTML = spans
-      .map(([a, b]) => `<span style="left:${a.toFixed(3)}%;width:${Math.max(0, b - a).toFixed(3)}%"></span>`)
+    host.innerHTML = merged
+      .map(([from, to]) => {
+        const a = Math.max(0, (from / dur) * 100);
+        const b = Math.min(100, (to / dur) * 100);
+        return `<span style="left:${a.toFixed(3)}%;width:${Math.max(0, b - a).toFixed(3)}%"></span>`;
+      })
       .join('');
   };
   video.addEventListener('progress', updateBuffered);

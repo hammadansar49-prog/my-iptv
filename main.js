@@ -2035,6 +2035,11 @@ function startProxyServer() {
       '-loglevel', 'error',
       '-nostdin',
       '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '4',
+      // Without this, a one-connection account that's still counting the
+      // browser's just-closed HLS connection against the limit makes ffmpeg
+      // hang on connect forever — no data, no error, no timeout — instead
+      // of the request failing so the client's own retry logic can kick in.
+      '-rw_timeout', '12000000',
       '-user_agent', 'VLC/3.0.21 Libavormat/61.19.100 Libavcodec/61.7.100',
       '-i', target,
       '-map', '0:v:0?',

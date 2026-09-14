@@ -117,6 +117,8 @@ class PlayerController {
     if (this._hlsRetryTimer) { clearTimeout(this._hlsRetryTimer); this._hlsRetryTimer = null; }
     if (this._subTimer) { clearInterval(this._subTimer); this._subTimer = null; }
     if (this._mse) { try { this._mse.destroy(); } catch {} this._mse = null; }
+    this._clearFreezeWatchdog();
+    this._clearAudioWatchdog();
     this._stopFpsLoop();
     this._teardownEngines();
     this.video.removeAttribute('src');
@@ -146,6 +148,103 @@ class PlayerController {
   }
   _clearStallTimer() {
     if (this._stallTimer) { clearTimeout(this._stallTimer); this._stallTimer = null; }
+  }
+
+  // hls.js/mpegts.js only raise an error when the *network* fails — a live
+  // channel that goes silently frozen (decoder wedged on a corrupt frame,
+  // or stuck waiting on a buffer that never fills) never fires one, so it
+  // just sits there with no message at all. This watches actual playback
+  // progress directly: if currentTime stops moving for a few seconds while
+  // the video isn't paused and isn't merely waiting on empty buffer, first
+  // try a tiny nudge (unwedges a lot of decoder stalls on its own); if that
+  // doesn't help, rebuild the whole engine at the same live edge.
+  _armFreezeWatchdog(token) {
+    this._clearFreezeWatchdog();
+    if (!this.isLive) return;
+    let lastTime = -1;
+    let stuckTicks = 0;
+    let nudged = false;
+    this._freezeWatchdog = setInterval(() => {
+      if (token !== this._playToken || this.video.paused || this.video.seeking) {
+        stuckTicks = 0; nudged = false; lastTime = this.video.currentTime;
+        return;
+      }
+      const hasBufferAhead = Array.from({ length: this.video.buffered.length }, (_, i) => i)
+        .some((i) => this.video.buffered.end(i) - this.video.currentTime > 0.5);
+      const t = this.video.currentTime;
+      if (t > lastTime + 0.05 || !hasBufferAhead) {
+        stuckTicks = 0; nudged = false; lastTime = t;
+        return;
+      }
+      stuckTicks++;
+      if (stuckTicks === 3) {
+        console.log('[player] live playback frozen — nudging');
+        try { this.video.currentTime = t + 0.2; } catch {}
+        nudged = true;
+      } else if (stuckTicks >= 6) {
+        console.log('[player] live playback still frozen after nudge — reloading channel');
+        this._clearFreezeWatchdog();
+        this._notify('buffering', 'Reconnecting...');
+        const url = this._originalUrl;
+        this._teardownEngines();
+        this._playDirect(url, token);
+      }
+    }, 1000);
+  }
+  _clearFreezeWatchdog() {
+    if (this._freezeWatchdog) { clearInterval(this._freezeWatchdog); this._freezeWatchdog = null; }
+  }
+
+  // ---- Silent audio on channels Chromium claims it can decode ----
+  //
+  // The BUFFER_CODECS check in _playHls catches audio codecs MediaSource
+  // openly refuses. Some (notably AC-3/E-AC-3 on this Chromium/Windows
+  // build) pass isTypeSupported() and hls.js appends them without any
+  // error, yet no PCM ever comes out — the picture plays perfectly and the
+  // channel is just silent forever. That can only be told apart from "no
+  // audio track at all" by watching whether Chromium is actually decoding
+  // any audio bytes once real playback is underway.
+  _armAudioWatchdog(token) {
+    this._clearAudioWatchdog();
+    if (typeof this.video.webkitAudioDecodedByteCount !== 'number') return; // not this Chromium build
+    let goodTicks = 0;
+    this._audioWatchdog = setInterval(() => {
+      if (token !== this._playToken) { this._clearAudioWatchdog(); return; }
+      // Only counts once picture is genuinely flowing — otherwise a slow
+      // start looks identical to a silent channel for the first second.
+      if (this.video.paused || this.video.videoWidth === 0) return;
+      if (this.video.webkitAudioDecodedByteCount > 0) { this._clearAudioWatchdog(); return; }
+      goodTicks++;
+      if (goodTicks >= 4) {
+        this._clearAudioWatchdog();
+        if (this._lastMode === 'audiofix' || this._lastMode === 'transcode') {
+          // Already tried re-encoding the audio and it's still silent — at
+          // this point the provider's own feed for this channel almost
+          // certainly has no audio track at all, not a codec problem we can
+          // fix. Say so plainly instead of leaving the picture up with no
+          // sound and no explanation.
+          console.log('[player] still no audio after re-encoding — this channel likely has none in the source');
+          this._notify('no-audio', 'This channel appears to have no audio in the broadcast.');
+          return;
+        }
+        console.log(`[player] no audio decoded after ${goodTicks}s of picture — switching to audio-fix mode`);
+        const at = this._stage.startsWith('proxy') ? this.getDisplayCurrentTime() : this._startAt;
+        this._teardownEngines();
+        this._notify('buffering', 'Fixing audio...');
+        // A one-connection provider account can take a moment to let go of
+        // the connection hls.js/mpegts.js was just using — asking for a new
+        // one immediately sometimes gets refused or left hanging. A short
+        // pause here comfortably covers that hand-off.
+        setTimeout(() => {
+          if (token !== this._playToken) return;
+          this._playProxy(this._originalUrl, token, 'audiofix', at);
+          this._armAudioWatchdog(token);
+        }, 700);
+      }
+    }, 1000);
+  }
+  _clearAudioWatchdog() {
+    if (this._audioWatchdog) { clearInterval(this._audioWatchdog); this._audioWatchdog = null; }
   }
 
   _startFpsLoop() {
@@ -401,6 +500,8 @@ class PlayerController {
         if (token !== this._playToken || hls !== this.hls) return;
         this._applyHlsQuality();
         this.video.play().catch(() => {});
+        this._armFreezeWatchdog(token);
+        this._armAudioWatchdog(token);
       });
       hls.on(window.Hls.Events.FRAG_BUFFERED, () => {
         if (token !== this._playToken || hls !== this.hls) return;
@@ -500,7 +601,11 @@ class PlayerController {
       this.mpegts = window.mpegts.createPlayer({ type: 'mpegts', isLive: true, url }, {
         enableWorker: true,
         enableStashBuffer: true,
-        stashInitialSize: 1024 * 1024,
+        // A small stash empties fast on an HD channel the moment the network
+        // dips even briefly — that's what a silent freeze (no error, no
+        // message, picture just stops) looks like. A bigger cushion absorbs
+        // those blips before playback ever runs dry.
+        stashInitialSize: 4 * 1024 * 1024,
         liveBufferLatencyChasing: false,
         lazyLoad: false,
         autoCleanupSourceBuffer: true
@@ -514,6 +619,8 @@ class PlayerController {
         this._fallback(token, 'This channel format is unsupported.');
       });
       this._armStallTimer(token, 12000);
+      this._armFreezeWatchdog(token);
+      this._armAudioWatchdog(token);
       return;
     }
     this._fallback(token, null);
@@ -733,6 +840,7 @@ class PlayerController {
       // ffmpeg couldn't open the source.
       const timeout = this.isLive ? 12000 : (this._seekOffset > 0 ? 120000 : 40000);
       this._armStallTimer(token, timeout);
+      if (this.isLive && finalMode === 'copy') this._armAudioWatchdog(token);
     };
 
     // The probe costs a couple of seconds but earns them back twice over: it
