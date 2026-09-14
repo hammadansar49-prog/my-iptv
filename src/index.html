@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>IPTV Player</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ===================== SPLASH SCREEN ===================== -->
+<div id="view-splash" class="view active">
+  <div class="splash-card">
+    <div class="splash-logo">Z</div>
+    <div class="splash-title">IPTV Player</div>
+    <div class="splash-subtitle" id="splash-subtitle">Starting IPTV Player</div>
+    <div class="splash-progress-wrap">
+      <div class="splash-progress-bar" id="splash-progress-bar"></div>
+    </div>
+    <div class="splash-status-row">
+      <span id="splash-status-left">STARTING</span>
+      <span id="splash-status-right">PLEASE WAIT</span>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== LOGIN VIEW ===================== -->
+<div id="view-login" class="view active">
+  <div class="login-card">
+    <div class="brand">
+      <div class="brand-mark">Z</div>
+      <div class="brand-name">IPTV Player</div>
+    </div>
+
+    <div class="login-tabs">
+      <button class="ltab active" data-tab="xtream">Xtream Codes</button>
+      <button class="ltab" data-tab="m3u">M3U URL</button>
+    </div>
+
+    <div id="tab-xtream" class="ltab-panel active">
+      <label>Server URL</label>
+      <input id="x-url" type="text" placeholder="http://server.example.com:8080" />
+      <label>Username</label>
+      <input id="x-user" type="text" placeholder="Username" />
+      <label>Password</label>
+      <input id="x-pass" type="password" placeholder="Password" />
+    </div>
+
+    <div id="tab-m3u" class="ltab-panel">
+      <label>Playlist Name</label>
+      <input id="m-name" type="text" placeholder="My Playlist" />
+      <label>M3U URL</label>
+      <input id="m-url" type="text" placeholder="http://server.example.com/playlist.m3u" />
+    </div>
+
+    <div id="login-error" class="login-error"></div>
+    <button id="btn-login" class="btn-primary">Login</button>
+
+    <div class="saved-accounts" id="saved-accounts"></div>
+  </div>
+</div>
+
+<!-- ===================== MAIN APP VIEW ===================== -->
+<div id="view-app" class="view">
+  <header class="topbar">
+    <div class="tb-left">
+      <div class="brand-mark small">Z</div>
+      <div class="clock">
+        <div id="clock-time">--:--</div>
+        <div id="clock-date">--</div>
+      </div>
+    </div>
+    <nav class="tb-tabs">
+      <button class="tb-tab active" data-section="live"><span class="ic">📺</span> Live TV</button>
+      <button class="tb-tab" data-section="movies"><span class="ic">🎬</span> Movies</button>
+      <button class="tb-tab" data-section="series"><span class="ic">📀</span> Series</button>
+    </nav>
+    <div class="tb-right">
+      <div class="account-pill" id="account-pill">
+        <span id="account-name">Account</span>
+        <small id="account-sub">-</small>
+      </div>
+      <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
+      <button class="icon-btn" id="btn-logout" title="Switch account">🚪</button>
+    </div>
+  </header>
+
+  <div class="body-grid">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-top">
+        <div class="sb-quick" id="sb-continue">⏱ Continue Watching <span id="cw-count">0</span></div>
+        <div class="sb-quick" id="sb-recent">🕘 Recently Watched <span id="recent-count">0</span></div>
+        <div class="sb-quick" id="sb-favorites">⭐ Favorites <span id="fav-count">0</span></div>
+      </div>
+      <div class="sb-heading">
+        <span>Categories</span><span id="cat-count">0</span>
+      </div>
+      <input id="cat-search" class="cat-search" placeholder="Search categories" />
+      <div class="cat-list" id="cat-list"></div>
+    </aside>
+
+    <main class="content">
+      <div class="content-header">
+        <h2 id="content-title">All channels</h2>
+        <div class="content-sub" id="content-sub"></div>
+        <input id="item-search" class="item-search" placeholder="Search..." />
+      </div>
+      <div class="grid" id="item-grid"></div>
+
+      <!-- Live TV gets its own layout: an inline preview player (so you can
+           surf channels without leaving the list) plus a channel list with
+           its own quick program info, instead of the movie/series grid. -->
+      <div class="live-panel" id="live-panel">
+        <div class="live-top">
+          <div class="live-preview" id="live-preview">
+            <!-- The shared #video element (normally in the fullscreen player
+                 view) is docked here while browsing Live TV, and moved into
+                 #player-wrap when expanded — same element, same connection,
+                 no reload either way. -->
+            <div class="live-preview-status" id="live-preview-status">Select a channel to preview</div>
+            <div class="live-preview-controls">
+              <button class="icon-btn" id="live-playpause" title="Play/Pause">▶</button>
+              <button class="icon-btn" id="live-mute" title="Mute/Unmute">🔇</button>
+              <button class="icon-btn" id="live-expand" title="Open full player">⛶</button>
+            </div>
+          </div>
+          <div class="live-info" id="live-info">
+            <div class="live-info-empty">Pick a channel from the list to see what's on.</div>
+          </div>
+        </div>
+        <div class="live-list-wrap">
+          <div class="live-list" id="live-list"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ===================== PLAYER VIEW ===================== -->
+<div id="view-player" class="view">
+  <div class="player-wrap" id="player-wrap">
+    <video id="video" playsinline></video>
+
+    <div class="player-overlay" id="player-overlay">
+      <div class="p-top">
+        <button class="p-back" id="p-back">‹ Back</button>
+        <div class="p-top-right">
+          <span class="p-badge" id="p-quality">HD</span>
+          <span class="p-badge" id="p-fps">-</span>
+          <button class="icon-btn" id="p-fav" title="Favorite">♡</button>
+          <button class="icon-btn" id="p-settings" title="Quality/Settings">⚙️</button>
+          <button class="icon-btn" id="p-pip" title="Picture in Picture">🗗</button>
+          <button class="icon-btn" id="p-fullscreen" title="Fullscreen">⛶</button>
+        </div>
+      </div>
+
+      <div class="p-center-status" id="p-center-status"></div>
+
+      <div class="p-bottom">
+        <div class="p-seekbar">
+          <span id="p-time-cur">00:00</span>
+          <div class="p-seek-track">
+            <div class="p-seek-track-bg"></div>
+            <div class="p-seek-buffered" id="p-seek-buffered"></div>
+            <div class="p-seek-played" id="p-seek-played"></div>
+            <input type="range" id="p-seek" min="0" max="100" value="0" step="0.1" />
+          </div>
+          <span id="p-time-total">00:00</span>
+        </div>
+        <div class="p-controls">
+          <div class="p-controls-left">
+            <button class="p-ctl" id="p-playpause" title="Play/Pause">⏸</button>
+            <button class="p-ctl" id="p-rw" title="-10s">⏪10</button>
+            <button class="p-ctl" id="p-fw" title="+10s">10⏩</button>
+            <button class="p-ctl" id="p-stop" title="Stop">⏹</button>
+            <div class="p-nowplaying" id="p-nowplaying">
+              <div class="p-np-thumb" id="p-np-thumb"></div>
+              <div class="p-np-text">
+                <div id="p-np-title">-</div>
+                <div id="p-np-sub">-</div>
+              </div>
+            </div>
+          </div>
+          <div class="p-controls-right">
+            <span class="p-speed" id="p-speed">1.0x</span>
+            <button class="icon-btn" id="p-audio" title="Audio track">🎵</button>
+            <button class="icon-btn" id="p-subs" title="Subtitles">💬</button>
+            <button class="icon-btn" id="p-vol-btn" title="Mute">🔊</button>
+            <input type="range" id="p-vol" min="0" max="1" step="0.01" value="1" class="p-vol-slider" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../node_modules/hls.js/dist/hls.min.js"></script>
+<script src="../node_modules/mpegts.js/dist/mpegts.js"></script>
+<script src="xtream.js"></script>
+<script src="player.js"></script>
+<script src="renderer.js"></script>
+</body>
+</html>

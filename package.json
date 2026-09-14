@@ -1,0 +1,43 @@
+{
+  "name": "iptv-player",
+  "version": "1.1.0",
+  "description": "Xtream Codes IPTV Player for Windows",
+  "main": "main.js",
+  "author": "veo444555",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "hls.js": "^1.7.3",
+    "mpegts.js": "^1.8.2"
+  },
+  "build": {
+    "appId": "com.veo.iptvplayer",
+    "productName": "IPTV Player",
+    "directories": { "output": "release" },
+    "files": ["main.js", "preload.js", "src/**/*", "assets/**/*", "package.json"],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "assets/icon.ico",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "IPTV Player",
+      "artifactName": "IPTV-Player-Setup-${version}.exe",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

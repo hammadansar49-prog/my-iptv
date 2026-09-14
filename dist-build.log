@@ -1,0 +1,20 @@
+
+> iptv-player@1.0.0 dist
+> electron-builder --win nsis
+
+  • electron-builder  version=26.15.3 os=10.0.19045
+  • loaded configuration  file=package.json ("build" field)
+  • executing @electron/rebuild  electronVersion=44.3.0 arch=x64 buildFromSource=false workspaceRoot=C:\Users\HAMMADX\Desktop\build iptvplayer projectDir=./ appDir=./
+  • installing native dependencies  arch=x64
+  • completed installing native dependencies
+  • packaging       platform=win32 arch=x64 electron=44.3.0 appOutDir=release\win-unpacked
+  • downloaded      label=electron progress=100%
+  • downloaded electron zip extracted successfully  output=C:\Users\HAMMADX\Desktop\build iptvplayer\release\win-unpacked
+  • searching for node modules  pm=npm searchDir=C:\Users\HAMMADX\Desktop\build iptvplayer
+  • updating asar integrity executable resource  executablePath=release\win-unpacked\IPTV Player.exe
+  • signing with signtool.exe  path=release\win-unpacked\IPTV Player.exe
+  • building        target=nsis file=release\IPTV-Player-Setup-1.0.0.exe archs=x64 oneClick=false perMachine=false
+  • signing with signtool.exe  path=release\win-unpacked\resources\elevate.exe
+  • signing with signtool.exe  path=release\IPTV-Player-Setup-1.0.0.__uninstaller.exe
+  • signing with signtool.exe  path=release\IPTV-Player-Setup-1.0.0.exe
+  • building block map  blockMapFile=release\IPTV-Player-Setup-1.0.0.exe.blockmap

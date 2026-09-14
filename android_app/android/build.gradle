@@ -1,0 +1,29 @@
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = "../build"
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+// Some plugins (e.g. video_player_android) hardcode "-Werror" in their own
+// build.gradle. Combined with newer JDKs (21+) flagging Java 8 source/target
+// as "obsolete", that turns a harmless warning into a hard build failure.
+// Strip -Werror from every subproject's javac invocation instead of patching
+// each plugin.
+subprojects {
+    tasks.withType(JavaCompile).configureEach {
+        options.compilerArgs.removeAll { it == "-Werror" }
+    }
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
