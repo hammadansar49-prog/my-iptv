@@ -105,6 +105,7 @@ function createWindow() {
 app.whenReady().then(async () => {
   await startProxyServer();
   createWindow();
+  revalidateLicenseInBackground();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -192,6 +193,110 @@ ipcMain.handle('net:getText', async (_e, url) => {
     return { ok: false, error: err.message || 'Network error' };
   }
 });
+
+// ==============================================================
+// License key gate. Update LICENSE_SERVER_URL to the deployed
+// license-server (see license-server/README.md) before shipping a build.
+// ==============================================================
+const LICENSE_SERVER_URL = process.env.MYIPTV_LICENSE_SERVER_URL || 'http://localhost:4100';
+
+function getMachineId() {
+  const raw = [os.hostname(), os.platform(), os.arch(), (os.cpus()[0] || {}).model || '', os.userInfo().username]
+    .join('|');
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+function postJson(url, body, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const lib = u.protocol === 'https:' ? https : http;
+    const payload = JSON.stringify(body);
+    const req = lib.request(u, {
+      method: 'POST',
+      timeout: timeoutMs,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+    }, (res) => {
+      let chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        try {
+          const text = Buffer.concat(chunks).toString('utf-8');
+          resolve({ status: res.statusCode, data: text ? JSON.parse(text) : {} });
+        } catch (e) {
+          reject(new Error('Server sent an invalid response'));
+        }
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('Connection timed out — server is not responding')));
+    req.on('error', (err) => reject(new Error(err.message || 'Network error')));
+    req.write(payload);
+    req.end();
+  });
+}
+
+function readLicense() {
+  const store = readStore();
+  return (store && store.license) || null;
+}
+
+function writeLicense(license) {
+  const store = readStore();
+  store.license = license;
+  writeStore(store);
+}
+
+function localLicenseStatus() {
+  const lic = readLicense();
+  if (!lic || !lic.expiresAt) return { valid: false };
+  return { valid: lic.expiresAt > Date.now(), plan: lic.plan, expiresAt: lic.expiresAt };
+}
+
+ipcMain.handle('license:getStatus', () => localLicenseStatus());
+
+ipcMain.handle('license:getPlans', async () => {
+  try {
+    const text = await fetchText(`${LICENSE_SERVER_URL}/plans`);
+    const data = JSON.parse(text);
+    return { ok: true, plans: data.plans || [] };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Network error', plans: [] };
+  }
+});
+
+ipcMain.handle('license:verify', async (_e, key) => {
+  try {
+    const machineId = getMachineId();
+    const { data } = await postJson(`${LICENSE_SERVER_URL}/verify`, { key: String(key || '').trim(), machineId });
+    if (data.valid) {
+      writeLicense({ key: String(key).trim(), plan: data.plan, expiresAt: data.expiresAt, lastVerifiedAt: Date.now() });
+      return { valid: true, plan: data.plan, expiresAt: data.expiresAt };
+    }
+    return { valid: false, reason: data.reason || 'invalid' };
+  } catch (err) {
+    return { valid: false, reason: 'network-error', error: err.message || 'Network error' };
+  }
+});
+
+// Background re-check of an already-saved license: catches revocations/
+// early expiry without forcing every boot to wait on a network round trip.
+// Never blocks — if offline, the last locally-cached expiry keeps working.
+async function revalidateLicenseInBackground() {
+  const lic = readLicense();
+  if (!lic || !lic.key) return;
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (lic.lastVerifiedAt && Date.now() - lic.lastVerifiedAt < dayMs) return;
+  try {
+    const machineId = getMachineId();
+    const { data } = await postJson(`${LICENSE_SERVER_URL}/verify`, { key: lic.key, machineId });
+    if (data.valid) {
+      writeLicense({ ...lic, plan: data.plan, expiresAt: data.expiresAt, lastVerifiedAt: Date.now() });
+    } else {
+      writeLicense({ ...lic, expiresAt: 0 });
+    }
+  } catch {
+    // Offline or server unreachable — keep the last known local state.
+  }
+}
 
 // ==============================================================
 // Local ffmpeg remux/transcode proxy.

@@ -28,5 +28,8 @@ contextBridge.exposeInMainWorld('api', {
     const handler = (_e, list) => cb(list);
     ipcRenderer.on('downloads:update', handler);
     return () => ipcRenderer.removeListener('downloads:update', handler);
-  }
+  },
+  licenseGetStatus: () => ipcRenderer.invoke('license:getStatus'),
+  licenseVerify: (key) => ipcRenderer.invoke('license:verify', key),
+  licenseGetPlans: () => ipcRenderer.invoke('license:getPlans')
 });

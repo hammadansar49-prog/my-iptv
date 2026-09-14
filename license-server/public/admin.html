@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MY IPTV — License Admin</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; min-height: 100vh;
+    background: #0f0f14; color: #f2f2f5;
+    font: 14px/1.5 -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #9a9aa5; margin: 0 0 24px; font-size: 13px; }
+  .card {
+    background: #1a1a22; border: 1px solid #2a2a35; border-radius: 12px;
+    padding: 20px; max-width: 900px; margin: 0 auto 20px;
+  }
+  input, select, button {
+    font: inherit; border-radius: 8px; border: 1px solid #33333f;
+    background: #14141a; color: #f2f2f5; padding: 9px 12px;
+  }
+  input:focus, select:focus { outline: 2px solid #EF3F66; border-color: #EF3F66; }
+  button {
+    background: linear-gradient(135deg, #EF3F66, #ff6a8a);
+    border: none; color: #fff; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button.secondary { background: #262631; color: #f2f2f5; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #26262f; }
+  th { color: #9a9aa5; font-weight: 600; }
+  .status { padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .status.unused { background: #2a2a35; color: #b7b7c2; }
+  .status.active { background: rgba(63,239,150,.15); color: #3fef96; }
+  .status.revoked { background: rgba(239,63,63,.15); color: #ef3f3f; }
+  .status.expired { background: rgba(239,170,63,.15); color: #efaa3f; }
+  .key-out {
+    font-family: ui-monospace, monospace; background: #14141a;
+    border: 1px dashed #EF3F66; border-radius: 8px; padding: 10px 12px;
+    margin-top: 12px; display: none;
+  }
+  .err { color: #ef3f3f; font-size: 13px; margin-top: 10px; }
+  #app { display: none; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="card" style="max-width:360px; margin-top: 80px;">
+    <h1>MY IPTV — License Admin</h1>
+    <p class="sub">Enter admin password to continue.</p>
+    <input id="pw" type="password" placeholder="Admin password" style="width:100%" />
+    <div class="err" id="loginErr"></div>
+    <button id="loginBtn" style="width:100%; margin-top:10px;">Login</button>
+  </div>
+</div>
+
+<div id="app">
+  <h1>MY IPTV — License Admin</h1>
+  <p class="sub">Generate and manage subscription keys.</p>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <strong>Pricing plans</strong>
+      <span class="sub" style="margin:0">Shown live in the app's lock screen &mdash; edit here, app updates instantly.</span>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Label</th><th>Duration (days)</th><th>Price</th><th>Currency</th><th>Order</th><th>Enabled</th><th></th></tr>
+      </thead>
+      <tbody id="plansBody"></tbody>
+    </table>
+    <div class="row" style="margin-top:14px">
+      <input id="pLabel" placeholder="Label e.g. 1 Month" style="width:140px" />
+      <input id="pDays" type="number" min="1" placeholder="Days" style="width:90px" />
+      <input id="pPrice" type="number" min="0" step="0.01" placeholder="Price" style="width:100px" />
+      <input id="pCurrency" placeholder="Currency" value="PKR" style="width:80px" />
+      <input id="pOrder" type="number" placeholder="Order" style="width:80px" value="0" />
+      <button id="addPlanBtn">Add plan</button>
+    </div>
+    <div class="err" id="planErr"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <select id="duration"></select>
+      <input id="planLabel" placeholder="Plan label (auto-filled from plan)" style="flex:1; min-width:200px" />
+      <button id="genBtn">Generate key</button>
+    </div>
+    <div class="key-out" id="keyOut"></div>
+    <div class="err" id="genErr"></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <strong>Issued keys</strong>
+      <button class="secondary" id="refreshBtn">Refresh</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Key</th><th>Plan</th><th>Status</th><th>Machine</th><th>Created</th><th>Expires</th><th></th></tr>
+      </thead>
+      <tbody id="keysBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let token = '';
+
+const $ = (s) => document.querySelector(s);
+
+$('#loginBtn').addEventListener('click', async () => {
+  const password = $('#pw').value;
+  $('#loginErr').textContent = '';
+  try {
+    const r = await fetch('/admin/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || 'Login failed');
+    token = password;
+    $('#login').style.display = 'none';
+    $('#app').style.display = 'block';
+    loadPlans();
+    loadKeys();
+  } catch (e) {
+    $('#loginErr').textContent = e.message;
+  }
+});
+
+async function adminFetch(url, opts = {}) {
+  const r = await fetch(url, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(opts.headers || {}) },
+  });
+  const data = await r.json();
+  if (!r.ok || data.ok === false) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+$('#genBtn').addEventListener('click', async () => {
+  $('#genErr').textContent = '';
+  $('#keyOut').style.display = 'none';
+  try {
+    const durationDays = Number($('#duration').value);
+    const planLabel = $('#planLabel').value.trim();
+    const data = await adminFetch('/admin/keys', {
+      method: 'POST',
+      body: JSON.stringify({ durationDays, planLabel }),
+    });
+    $('#keyOut').textContent = data.key;
+    $('#keyOut').style.display = 'block';
+    loadKeys();
+  } catch (e) {
+    $('#genErr').textContent = e.message;
+  }
+});
+
+let currentPlans = [];
+
+async function loadPlans() {
+  try {
+    const data = await adminFetch('/admin/plans');
+    currentPlans = data.plans;
+    $('#plansBody').innerHTML = currentPlans.map((p) => `
+      <tr>
+        <td>${p.label}</td>
+        <td>${p.duration_days}</td>
+        <td>${p.price}</td>
+        <td>${p.currency}</td>
+        <td>${p.sort_order}</td>
+        <td>${p.enabled ? 'Yes' : 'No'}</td>
+        <td>
+          <button class="secondary" data-toggle="${p.id}" data-enabled="${p.enabled}">${p.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="secondary" data-del="${p.id}">Delete</button>
+        </td>
+      </tr>`).join('');
+
+    $('#plansBody').querySelectorAll('button[data-toggle]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await adminFetch(`/admin/plans/${btn.dataset.toggle}`, {
+          method: 'PUT',
+          body: JSON.stringify({ enabled: btn.dataset.enabled === '1' ? false : true }),
+        });
+        loadPlans();
+      });
+    });
+    $('#plansBody').querySelectorAll('button[data-del]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await adminFetch(`/admin/plans/${btn.dataset.del}`, { method: 'DELETE' });
+        loadPlans();
+      });
+    });
+
+    const durSel = $('#duration');
+    durSel.innerHTML = currentPlans
+      .filter((p) => p.enabled)
+      .map((p) => `<option value="${p.duration_days}" data-label="${p.label}">${p.label} (${p.duration_days}d)</option>`)
+      .join('');
+    if (currentPlans.length) $('#planLabel').value = currentPlans.find((p) => p.enabled)?.label || '';
+    durSel.addEventListener('change', () => {
+      const opt = durSel.selectedOptions[0];
+      if (opt) $('#planLabel').value = opt.dataset.label;
+    });
+  } catch (e) {
+    $('#planErr').textContent = e.message;
+  }
+}
+
+$('#addPlanBtn').addEventListener('click', async () => {
+  $('#planErr').textContent = '';
+  try {
+    await adminFetch('/admin/plans', {
+      method: 'POST',
+      body: JSON.stringify({
+        label: $('#pLabel').value.trim(),
+        durationDays: Number($('#pDays').value),
+        price: Number($('#pPrice').value),
+        currency: $('#pCurrency').value.trim() || 'PKR',
+        sortOrder: Number($('#pOrder').value) || 0,
+      }),
+    });
+    $('#pLabel').value = '';
+    $('#pDays').value = '';
+    $('#pPrice').value = '';
+    $('#pOrder').value = '0';
+    loadPlans();
+  } catch (e) {
+    $('#planErr').textContent = e.message;
+  }
+});
+
+$('#refreshBtn').addEventListener('click', loadKeys);
+
+function statusOf(row) {
+  if (row.status === 'active' && row.expires_at && row.expires_at < Date.now()) return 'expired';
+  return row.status;
+}
+
+async function loadKeys() {
+  try {
+    const data = await adminFetch('/admin/keys');
+    $('#keysBody').innerHTML = data.keys.map((row) => {
+      const st = statusOf(row);
+      return `<tr>
+        <td style="font-family:ui-monospace,monospace">${row.key}</td>
+        <td>${row.plan_label}</td>
+        <td><span class="status ${st}">${st}</span></td>
+        <td>${row.machine_id ? row.machine_id.slice(0, 10) + '…' : '—'}</td>
+        <td>${new Date(row.created_at).toLocaleDateString()}</td>
+        <td>${row.expires_at ? new Date(row.expires_at).toLocaleDateString() : '—'}</td>
+        <td>${row.status !== 'revoked' ? `<button class="secondary" data-id="${row.id}">Revoke</button>` : ''}</td>
+      </tr>`;
+    }).join('');
+    $('#keysBody').querySelectorAll('button[data-id]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await adminFetch(`/admin/keys/${btn.dataset.id}/revoke`, { method: 'POST' });
+        loadKeys();
+      });
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+</script>
+</body>
+</html>

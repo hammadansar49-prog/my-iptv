@@ -2591,6 +2591,91 @@ async function refreshCatalogInBackground(client, account) {
   } catch { /* stale cache just expires on its own next launch */ }
 }
 
+// ===================== License gate =====================
+// Blocks the rest of the app (no splash, no login, nothing) until a valid
+// key is verified. See CLAUDE.md / license-server/ for the full system.
+let licensePlansCache = null;
+
+async function updateProBadge() {
+  try {
+    const status = await window.api.licenseGetStatus();
+    $('#pro-badge').hidden = !status.valid;
+  } catch { /* badge just stays hidden */ }
+}
+
+async function renderLicensePlans() {
+  const host = $('#license-plans');
+  if (!host) return;
+  try {
+    const res = await window.api.licenseGetPlans();
+    licensePlansCache = (res && res.plans) || [];
+  } catch { licensePlansCache = []; }
+  if (!licensePlansCache.length) { host.innerHTML = ''; return; }
+  host.innerHTML = licensePlansCache.map((p) => `
+    <div class="license-plan">
+      <div class="lp-label">${p.label}</div>
+      <div class="lp-price">${p.price} ${p.currency}</div>
+    </div>
+  `).join('');
+}
+
+function licenseSetError(msg) {
+  const el = $('#license-error');
+  if (el) el.textContent = msg || '';
+}
+
+function initLicenseGate() {
+  const btn = $('#btn-license-verify');
+  const input = $('#license-key-input');
+  if (!btn || !input) return;
+  const submit = async () => {
+    const key = input.value.trim();
+    if (!key) { licenseSetError('Enter a license key.'); return; }
+    licenseSetError('');
+    btn.disabled = true;
+    btn.textContent = 'Verifying...';
+    try {
+      const res = await window.api.licenseVerify(key);
+      if (res.valid) {
+        await updateProBadge();
+        boot();
+      } else {
+        const messages = {
+          'not-found': 'This key was not found.',
+          'expired': 'This key has expired.',
+          'revoked': 'This key has been revoked.',
+          'wrong-device': 'This key is already active on another device.',
+          'network-error': 'Could not reach the license server. Check your internet connection.'
+        };
+        licenseSetError(messages[res.reason] || 'Invalid license key.');
+      }
+    } catch {
+      licenseSetError('Something went wrong. Please try again.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Verify';
+    }
+  };
+  btn.addEventListener('click', submit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+}
+
+// Every 30 minutes while the app is open, re-check the cached license status
+// (cheap, local — main process only phones the server once/day, see main.js
+// revalidateLicenseInBackground). If it has flipped invalid, block the UI
+// again immediately instead of waiting for the next restart.
+function armLicenseWatch() {
+  setInterval(async () => {
+    try {
+      const status = await window.api.licenseGetStatus();
+      if (!status.valid) {
+        showView('license');
+        renderLicensePlans();
+      }
+    } catch { /* ignore — don't lock the user out over a transient error */ }
+  }, 30 * 60 * 1000);
+}
+
 // ===================== Boot =====================
 async function boot() {
   await loadStore();
@@ -2748,4 +2833,18 @@ async function boot() {
   }
 }
 
-boot();
+async function startup() {
+  initLicenseGate();
+  armLicenseWatch();
+  let status;
+  try { status = await window.api.licenseGetStatus(); } catch { status = { valid: false }; }
+  if (!status.valid) {
+    showView('license');
+    renderLicensePlans();
+    return;
+  }
+  await updateProBadge();
+  boot();
+}
+
+startup();

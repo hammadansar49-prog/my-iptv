@@ -1,0 +1,13 @@
+{
+  "name": "my-iptv-license-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "License key issuing + verification server for MY IPTV",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

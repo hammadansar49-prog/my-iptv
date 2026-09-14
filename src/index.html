@@ -7,6 +7,24 @@
 </head>
 <body>
 
+<!-- ===================== LICENSE GATE ===================== -->
+<div id="view-license" class="view">
+  <div class="login-card license-card">
+    <div class="brand">
+      <div class="brand-mark">M</div>
+      <div class="brand-name">MY IPTV</div>
+    </div>
+    <div class="license-subtitle">Enter your license key to continue</div>
+
+    <div id="license-plans" class="license-plans"></div>
+
+    <label>License key</label>
+    <input id="license-key-input" type="text" placeholder="MYIPTV-XXXX-XXXX-XXXX" autocomplete="off" />
+    <div id="license-error" class="login-error"></div>
+    <button id="btn-license-verify" class="btn-primary">Verify</button>
+  </div>
+</div>
+
 <!-- ===================== SPLASH SCREEN ===================== -->
 <div id="view-splash" class="view active">
   <div class="splash-card">
@@ -64,6 +82,7 @@
   <header class="topbar">
     <div class="tb-left">
       <div class="brand-mark small">Z</div>
+      <span class="pro-badge" id="pro-badge" hidden>PRO</span>
       <div class="clock">
         <div id="clock-time">--:--</div>
         <div id="clock-date">--</div>

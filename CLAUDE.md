@@ -82,6 +82,44 @@ slow/unstable connection.
   is duplicated in both `player_screen.dart` and `live_tv_screen.dart` — keep them in sync if one
   changes.
 
+## License key system (new — `license-server/`, plus gate screen in the PC app)
+
+The PC app is gated behind a license key so it can be sold as a subscription. Two halves:
+
+- **`license-server/`** — a standalone Node/Express service (NOT part of the Electron app, run and
+  hosted separately) that issues and verifies keys and serves live pricing. Data is a plain JSON
+  file (`license-server/licenses.json`, gitignored) via `license-server/db.js` — deliberately not
+  SQLite, because `better-sqlite3` needs a native build toolchain (Python + a C++ compiler) that
+  isn't guaranteed to exist wherever this gets deployed; this failed on first attempt on this very
+  machine (missing Python), which is why it's a JSON file instead, matching the same pattern
+  `main.js` already uses for its own store. Admin panel is `license-server/public/admin.html`
+  (password-gated via `ADMIN_PASSWORD` env var, sent as a Bearer token on every admin request).
+- **PC app integration** (`main.js`, `preload.js`, `src/index.html`, `src/renderer.js`,
+  `src/styles.css`): a new `view-license` screen (same `showView()` pattern as every other screen)
+  blocks `boot()` from running at all until `license:getStatus` reports a valid, unexpired key.
+  `main.js` talks to the license server via `LICENSE_SERVER_URL` (env var
+  `MYIPTV_LICENSE_SERVER_URL`, defaults to `http://localhost:4100` for local testing) — **this
+  must be pointed at the real deployed server URL before shipping a build**, or every user will
+  try to verify against localhost and fail.
+
+**Pricing is live, not hardcoded**: the license-gate screen calls `license:getPlans` (main.js) →
+`GET /plans` on the license server, so editing a plan's price/label/duration in the admin panel is
+reflected in the app immediately on next screen load — no rebuild needed. This was an explicit
+requirement; don't hardcode plan pricing back into `index.html`/`renderer.js`.
+
+**Key lifecycle**: a key's expiry clock starts on first successful `/verify` call (not at
+generation) — unsold keys don't expire sitting in inventory. Once activated, a key is bound to the
+device's `machineId` (`getMachineId()` in `main.js`, a hash of hostname/platform/arch/username) and
+rejects verification from a different device. `main.js`'s `revalidateLicenseInBackground()` re-
+checks with the server at most once per day (non-blocking, keeps the last known local state if
+offline) so a revoked/expired key gets caught even if the app is never restarted; the renderer also
+polls `license:getStatus` locally every 30 minutes (`armLicenseWatch()`) and bounces back to the
+gate screen if it goes invalid.
+
+**Not yet built** (explicitly out of scope when this was implemented): actual payment/checkout —
+today the admin manually generates a key after being paid some other way (WhatsApp, bank transfer,
+etc.) and hands it to the customer. Also not built: Android app licensing.
+
 ## Before pushing changes to GitHub
 This repo has `node_modules/`, `release/`, `vendor/` (bundled ffmpeg) and `*.log` gitignored — they
 should never show up in `git status` as untracked-and-about-to-be-added. If they do, something
