@@ -38,9 +38,11 @@ class Storage {
     }
   }
 
-  // ---- Settings ----
-  static String getQuality() => p.getString('quality') ?? 'auto';
-  static Future<void> setQuality(String q) => p.setString('quality', q);
+  // ---- Simple settings ----
+  static String str(String key, String fallback) => p.getString(key) ?? fallback;
+  static bool flag(String key, bool fallback) => p.getBool(key) ?? fallback;
+  static Future<void> setStr(String key, String value) => p.setString(key, value);
+  static Future<void> setFlag(String key, bool value) => p.setBool(key, value);
 
   // ---- History (Continue Watching / Recently Watched) ----
   static List<HistoryEntry> getHistory() {
@@ -55,7 +57,7 @@ class Storage {
   }
 
   static Future<void> saveHistory(List<HistoryEntry> list) async {
-    if (list.length > 60) list.removeRange(60, list.length);
+    if (list.length > 80) list.removeRange(80, list.length);
     await p.setString('history', jsonEncode(list.map((e) => e.toJson()).toList()));
   }
 

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class Account {
   final String id;
   final String type; // 'xtream' | 'm3u'
@@ -96,6 +98,14 @@ class PlayRequest {
   final String historyKey;
   double resumeAt;
 
+  /// A downloaded file played from the phone (no provider involved).
+  final bool local;
+
+  /// For episodes: the season's episode list and this episode's position in
+  /// it, so the next one can start by itself when this one ends.
+  final List<PlayRequest>? playlist;
+  final int playlistIndex;
+
   PlayRequest({
     required this.url,
     required this.isLive,
@@ -105,7 +115,101 @@ class PlayRequest {
     required this.thumb,
     required this.historyKey,
     this.resumeAt = 0,
+    this.local = false,
+    this.playlist,
+    this.playlistIndex = -1,
   });
+
+  bool get downloadable => !isLive && !local && url.startsWith('http');
+}
+
+/// One programme in a channel's guide.
+class EpgEntry {
+  final String title;
+  final String description;
+  final int start; // unix seconds
+  final int stop;
+
+  EpgEntry({required this.title, required this.description, required this.start, required this.stop});
+
+  static String _b64(dynamic v) {
+    final s = '${v ?? ''}';
+    if (s.isEmpty) return '';
+    try {
+      return utf8.decode(base64.decode(s), allowMalformed: true);
+    } catch (_) {
+      return s;
+    }
+  }
+
+  factory EpgEntry.fromJson(Map<String, dynamic> j) => EpgEntry(
+        title: _b64(j['title']),
+        description: _b64(j['description']),
+        start: int.tryParse('${j['start_timestamp'] ?? ''}') ?? 0,
+        stop: int.tryParse('${j['stop_timestamp'] ?? ''}') ?? 0,
+      );
+
+  bool isNow(int nowSec) => start <= nowSec && nowSec < stop;
+}
+
+/// A film or episode saved to the phone for watching offline.
+class DownloadItem {
+  final String id;
+  final String url;
+  final String title;
+  final String subtitle;
+  final String type; // movie | episode
+  final String thumb;
+  String filePath;
+  int totalBytes;
+  int receivedBytes;
+  String status; // queued | downloading | paused | failed | completed
+  String error;
+  final int addedAt;
+  int completedAt;
+
+  // Live figures, not saved.
+  double speed = 0; // bytes per second
+  double? get eta => status == 'downloading' && speed > 0 && totalBytes > 0 ? (totalBytes - receivedBytes) / speed : null;
+  double get progress => totalBytes > 0 ? (receivedBytes / totalBytes).clamp(0, 1) : (status == 'completed' ? 1 : 0);
+
+  DownloadItem({
+    required this.id,
+    required this.url,
+    required this.title,
+    required this.subtitle,
+    required this.type,
+    required this.thumb,
+    required this.filePath,
+    this.totalBytes = 0,
+    this.receivedBytes = 0,
+    this.status = 'queued',
+    this.error = '',
+    required this.addedAt,
+    this.completedAt = 0,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id, 'url': url, 'title': title, 'subtitle': subtitle, 'type': type, 'thumb': thumb,
+        'filePath': filePath, 'totalBytes': totalBytes, 'receivedBytes': receivedBytes,
+        'status': status, 'error': error, 'addedAt': addedAt, 'completedAt': completedAt,
+      };
+
+  factory DownloadItem.fromJson(Map<String, dynamic> j) => DownloadItem(
+        id: j['id'],
+        url: j['url'] ?? '',
+        title: j['title'] ?? '',
+        subtitle: j['subtitle'] ?? '',
+        type: j['type'] ?? 'movie',
+        thumb: j['thumb'] ?? '',
+        filePath: j['filePath'] ?? '',
+        totalBytes: j['totalBytes'] ?? 0,
+        receivedBytes: j['receivedBytes'] ?? 0,
+        status: j['status'] ?? 'queued',
+        error: j['error'] ?? '',
+        addedAt: j['addedAt'] ?? 0,
+        completedAt: j['completedAt'] ?? 0,
+      );
 }
 
 class HistoryEntry {

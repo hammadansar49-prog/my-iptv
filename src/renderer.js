@@ -10,6 +10,7 @@ const state = {
   liveCats: null, movieCats: null, seriesCats: null,
   itemCache: {},          // "section:catId" -> array of items (avoids re-fetching)
   currentSeries: null,
+  episodeContext: null,   // which episode list playback is walking through
   nowPlaying: null,
   filteredItems: [],
   renderedCount: 0,
@@ -17,6 +18,11 @@ const state = {
 };
 
 const PAGE_SIZE = 120;
+// How long a full-catalog fetch from splash boot stays valid on disk before
+// a relaunch has to redo it. Long enough that a quick "closed the app, came
+// back a few minutes later" doesn't eat the full load again; short enough
+// that a real content update on the provider's end still shows up soon.
+const DATA_CACHE_TTL_MS = 10 * 60 * 1000;
 let gridObserver = null;
 
 const $ = (sel) => document.querySelector(sel);
@@ -186,22 +192,110 @@ function initLoginForm() {
 
 // ===================== Enter App =====================
 function enterApp(auth) {
+  // How many streams the provider lets this account run at once decides
+  // whether a download can keep going while something is watched.
+  state.maxConnections = parseInt(auth && auth.user_info && auth.user_info.max_connections, 10) || 1;
+  applyDownloadPolicy();
   showView('app');
   $('#account-name').textContent = state.activeAccount.username;
   const exp = auth.user_info.exp_date;
   $('#account-sub').textContent = exp && exp !== null ? `Expires: ${new Date(exp * 1000).toLocaleDateString()}` : 'Xtream Codes';
-  switchSection('live');
+  switchSection(settings().startSection);
 }
 
 function enterAppM3U() {
+  state.maxConnections = 1; // an M3U list doesn't say; assume the usual single connection
+  applyDownloadPolicy();
   showView('app');
   $('#account-name').textContent = state.activeAccount.name;
   $('#account-sub').textContent = 'M3U Playlist';
-  switchSection('live');
+  switchSection(settings().startSection);
+}
+
+// ===================== Playlist switcher =====================
+function initPlaylistSwitcher() {
+  const menu = $('#playlist-menu');
+  const pill = $('#playlist-pill');
+
+  const close = () => { menu.hidden = true; };
+  pill.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (menu.hidden) { renderPlaylistMenu(); menu.hidden = false; } else close();
+  });
+  document.addEventListener('click', (e) => {
+    if (!menu.hidden && !menu.contains(e.target)) close();
+  });
+  $('#pl-menu-add').addEventListener('click', () => { close(); openSettings('playlists'); });
+}
+
+function renderPlaylistMenu() {
+  const list = $('#pl-menu-list');
+  const accounts = state.store.accounts || [];
+  $('#pl-menu-head').textContent = `YOUR PLAYLISTS (${accounts.length})`;
+  list.innerHTML = '';
+
+  accounts.forEach((acc) => {
+    const isActive = state.activeAccount && acc.id === state.activeAccount.id;
+    const row = document.createElement('button');
+    row.className = 'pl-row' + (isActive ? ' active' : '');
+    row.innerHTML = `
+      <span class="pl-icon">${acc.type === 'xtream' ? '☰' : '🔗'}</span>
+      <span class="pl-row-name">${escapeHtml(acc.name)}
+        <span class="pl-row-sub">${acc.type === 'xtream' ? 'Xtream Codes' : 'M3U playlist'}</span>
+      </span>
+      ${isActive ? '<span class="pl-row-check">✓</span>' : ''}`;
+    row.addEventListener('click', () => {
+      $('#playlist-menu').hidden = true;
+      if (!isActive) switchPlaylist(acc);
+    });
+    list.appendChild(row);
+  });
+
+  if (!accounts.length) {
+    list.innerHTML = '<div style="padding:10px 8px;color:var(--text-dim);font-size:12px;">No playlists yet.</div>';
+  }
+}
+
+// Switching source means everything cached for the old one is wrong, so the
+// catalog, item cache and any playback are dropped before reconnecting.
+async function switchPlaylist(acc) {
+  $('#account-name').textContent = 'Switching...';
+  if (player) { stopHistoryTracking(); player.destroy(); }
+  state.client = null;
+  state.m3uItems = null;
+  state.liveCats = state.movieCats = state.seriesCats = null;
+  state.itemCache = {};
+  state.items = [];
+  state.categories = [];
+  window.api.setCatalog(null).catch(() => {});
+
+  try {
+    if (acc.type === 'xtream') {
+      const client = new XtreamClient(acc.url, acc.username, acc.password);
+      const auth = await client.authenticate();
+      state.client = client;
+      state.activeAccount = acc;
+      state.store.activeAccountId = acc.id;
+      await saveStore();
+      enterApp(auth);
+    } else {
+      const items = await parseM3U(acc.url);
+      state.activeAccount = acc;
+      state.m3uItems = items;
+      state.store.activeAccountId = acc.id;
+      await saveStore();
+      enterAppM3U();
+    }
+  } catch (err) {
+    $('#account-name').textContent = acc.name;
+    $('#account-sub').textContent = 'Could not connect';
+    alert(`Could not switch to "${acc.name}": ${err.message || 'connection failed'}`);
+  }
 }
 
 // ===================== Sections / Categories =====================
 async function switchSection(section) {
+  state.viewingDownloads = false;
   state.section = section;
   state.categoryId = null;
   $$('.tb-tab').forEach((t) => t.classList.toggle('active', t.dataset.section === section));
@@ -251,6 +345,17 @@ async function loadCategoriesForSection() {
     if (!state.seriesCats) state.seriesCats = await state.client.getSeriesCategories();
     state.categories = state.seriesCats;
   }
+  state.categories = withoutAdult(state.categories, (c) => c.category_name);
+}
+
+// "18+" needs its own pattern: there's no word boundary after a plus sign,
+// so inside \b(...)\b it never matched anything.
+const ADULT_WORDS = /\b(xxx|adults?|porno?|sexy?|erotica?|playboy|hustler|brazzers|hot\s*tv)\b|18\s*\+|\+\s*18\b/i;
+// Applied to both the category list and the items inside "All", so turning
+// the switch on actually removes the content rather than just hiding a menu.
+function withoutAdult(list, nameOf) {
+  if (!settings().adultFilter) return list;
+  return (list || []).filter((x) => !ADULT_WORDS.test(nameOf(x) || ''));
 }
 
 function renderCategoryError(err) {
@@ -303,7 +408,33 @@ function cacheKey(catId) {
   return `${state.section}:${catId || 'all'}`;
 }
 
+// Swaps the content area back to the poster grid, undoing the Live TV
+// layout (inline preview + channel list) if that is what's showing.
+function showItemGrid() {
+  state.viewingDownloads = false;
+  $('#item-grid').style.display = '';
+  $('#live-panel').classList.remove('active');
+  stopLivePreview();
+}
+
+// Routes artwork through the local proxy, which downscales it to grid size
+// once and keeps it on disk. Providers serve full-resolution posters, and a
+// screen full of those is what made the grids take so long to fill in.
+//
+// Requests are spread over several local ports: the browser runs only six at
+// a time per port, which is what made a full screen of posters trickle in.
+// The same artwork always maps to the same port so its cached copy is hit.
+function thumbUrl(url, w = 300) {
+  const bases = state.thumbBases && state.thumbBases.length ? state.thumbBases : (state.thumbBase ? [state.thumbBase] : []);
+  if (!url || !bases.length || !/^https?:\/\//i.test(url)) return url || '';
+  let h = 0;
+  for (let i = 0; i < url.length; i++) h = (h * 31 + url.charCodeAt(i)) | 0;
+  const base = bases[Math.abs(h) % bases.length];
+  return `${base}/thumb?w=${w}&url=${encodeURIComponent(url)}`;
+}
+
 async function loadItemsForCategory(catId) {
+  state.viewingDownloads = false;
   const key = cacheKey(catId);
   const section = state.section; // frozen for this call — see the race-guard note below
 
@@ -315,8 +446,10 @@ async function loadItemsForCategory(catId) {
   // load is ever allowed to apply its result.
   const mySeq = ++state.loadSeq;
 
-  // Serve from cache instantly (feels instant, no spinner flash)
-  if (state.itemCache[key]) {
+  // Serve from cache instantly (feels instant, no spinner flash). An empty
+  // cached list is not trusted: that is what a failed download looks like,
+  // and trusting it is how Series ended up showing "0 items" until restart.
+  if (state.itemCache[key] && state.itemCache[key].length) {
     state.items = state.itemCache[key];
     renderGrid();
     return;
@@ -336,6 +469,7 @@ async function loadItemsForCategory(catId) {
       items = await state.client.getSeries(catId);
     }
     if (mySeq !== state.loadSeq) return; // a newer load superseded this one — discard
+    items = withoutAdult(items, (it) => it.name || it.title);
     state.itemCache[key] = items;
     state.items = items;
     renderGrid();
@@ -359,6 +493,7 @@ async function loadItemsForCategory(catId) {
 // (paginated) DOM rendering so huge lists (tens of thousands of items) never
 // block or slow down the UI.
 function renderGrid() {
+  state.viewingDownloads = false;
   if (state.section === 'live') {
     renderLiveList();
     return;
@@ -375,7 +510,9 @@ function renderGrid() {
   $('#content-sub').textContent = `${items.length} items`;
 
   const grid = $('#item-grid');
+  cancelPostersIn(grid);
   grid.innerHTML = '';
+  $('.content').scrollTop = 0;
 
   if (!items.length) {
     grid.innerHTML = '<div class="empty-state">No items found.</div>';
@@ -400,6 +537,7 @@ function appendGridBatch() {
   const sentinel = document.getElementById('grid-sentinel');
   if (sentinel) sentinel.remove();
   grid.appendChild(frag);
+  observePosters(grid);
   state.renderedCount = end;
 
   if (end < items.length) {
@@ -410,6 +548,129 @@ function appendGridBatch() {
     s.querySelector('button').addEventListener('click', appendGridBatch);
     grid.appendChild(s);
     observeSentinel(s);
+  }
+}
+
+// Loads artwork only for what is actually on screen (plus a small margin).
+//
+// Two things made long lists like "All movies" stay blank while scrolling:
+// every card that flew past on its way down started a download and never
+// gave it back, so the handful of connections the browser allows were busy
+// with hundreds of posters nobody was looking at any more, and the ones on
+// screen waited at the back of that queue. Now a card has to stay in view
+// for a moment before its poster is requested, and a download still running
+// when its card leaves the screen is cancelled.
+const POSTER_DWELL_MS = 120;
+const posterObservers = new Map(); // scroll container -> IntersectionObserver
+const posterTimers = new WeakMap();  // element -> pending dwell timer
+const postersInFlight = new Set();   // elements whose artwork is downloading
+
+function startPoster(el) {
+  if (el.dataset.src) {
+    const url = el.dataset.src;
+    el.onload = () => {
+      postersInFlight.delete(el);
+      delete el.dataset.src;
+      const io = el._posterObserver;
+      if (io) io.unobserve(el);
+    };
+    el.onerror = () => {
+      postersInFlight.delete(el);
+      delete el.dataset.src;
+      const io = el._posterObserver;
+      if (io) io.unobserve(el);
+      // Broken artwork: show the title placeholder instead of a broken image.
+      const thumb = el.closest('.card-thumb');
+      const card = el.closest('.card');
+      el.remove();
+      if (thumb && card && !thumb.querySelector('.card-thumb-name')) {
+        const name = document.createElement('span');
+        name.className = 'card-thumb-name';
+        name.textContent = (card.querySelector('.card-title') || {}).textContent || '';
+        thumb.insertBefore(name, thumb.firstChild);
+      }
+    };
+    postersInFlight.add(el);
+    el.src = url;
+  } else if (el.dataset.bg) {
+    // A CSS background can't be cancelled once requested, so it is fetched
+    // through an Image first (which can be) and applied when it arrives.
+    const url = el.dataset.bg;
+    const img = new Image();
+    img.decoding = 'async';
+    el._posterImg = img;
+    const finish = (ok) => {
+      postersInFlight.delete(el);
+      el._posterImg = null;
+      delete el.dataset.bg;
+      if (ok) el.style.backgroundImage = `url('${url}')`;
+      const io = el._posterObserver;
+      if (io) io.unobserve(el);
+    };
+    img.onload = () => finish(true);
+    img.onerror = () => finish(false);
+    postersInFlight.add(el);
+    img.src = url;
+  }
+}
+
+function cancelPoster(el) {
+  const timer = posterTimers.get(el);
+  if (timer) { clearTimeout(timer); posterTimers.delete(el); }
+  if (!postersInFlight.has(el)) return;
+  postersInFlight.delete(el);
+  if (el.dataset.src) {
+    el.onload = el.onerror = null;
+    el.removeAttribute('src'); // drops the request; data-src stays for later
+  } else if (el._posterImg) {
+    el._posterImg.onload = el._posterImg.onerror = null;
+    el._posterImg.src = '';
+    el._posterImg = null;
+  }
+}
+
+function posterObserverFor(scrollRoot) {
+  let io = posterObservers.get(scrollRoot);
+  if (io) return io;
+  io = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      const el = entry.target;
+      if (entry.isIntersecting) {
+        if (postersInFlight.has(el) || posterTimers.has(el)) return;
+        posterTimers.set(el, setTimeout(() => {
+          posterTimers.delete(el);
+          if (el.isConnected) startPoster(el);
+        }, POSTER_DWELL_MS));
+      } else {
+        cancelPoster(el);
+      }
+    });
+  }, { root: scrollRoot, rootMargin: '150px 0px' });
+  posterObservers.set(scrollRoot, io);
+  return io;
+}
+
+// Watches every not-yet-loaded poster under `root`. scrollRoot is the
+// element that actually scrolls those posters (the main content area unless
+// told otherwise, e.g. the live channel list scrolls on its own).
+function observePosters(root, scrollRoot) {
+  const scroller = scrollRoot || $('.content');
+  const io = posterObserverFor(scroller);
+  root.querySelectorAll('img[data-src], [data-bg]').forEach((el) => {
+    if (el._posterObserver === io) return;
+    el._posterObserver = io;
+    io.observe(el);
+  });
+}
+
+// Before a list is thrown away and redrawn: cancel its downloads now rather
+// than waiting for the observer to notice the elements are gone.
+function cancelPostersIn(root) {
+  for (const el of [...postersInFlight]) {
+    if (root.contains(el)) {
+      cancelPoster(el);
+      if (el._posterObserver) el._posterObserver.unobserve(el);
+    }
   }
 }
 
@@ -424,6 +685,19 @@ function observeSentinel(el) {
   gridObserver.observe(el);
 }
 
+// A large share of this catalog (close to 30,000 movies) links artwork as a
+// bare TMDB size folder — ".../t/p/w600_and_h900_bestv2" with no image in
+// it. Those can only ever fail, so they show the title card straight away
+// instead of spending a request each.
+function usableArtwork(url) {
+  if (!url || typeof url !== 'string') return '';
+  const path = url.split(/[?#]/)[0].replace(/\/+$/, '');
+  const last = path.slice(path.lastIndexOf('/') + 1);
+  if (/\/t\/p$/i.test(path.slice(0, path.lastIndexOf('/'))) && /^(w\d+|h\d+|original)(_and_h\d+)?(_bestv2)?$/i.test(last)) return '';
+  if (/^https?:\/\/[^/]+$/i.test(path)) return '';
+  return url;
+}
+
 function renderCard(it, sectionOverride) {
   const section = sectionOverride || state.section;
   const card = document.createElement('div');
@@ -431,16 +705,16 @@ function renderCard(it, sectionOverride) {
   card.className = 'card' + (isChannel ? ' channel' : '');
 
   const name = it.name || it.title || 'Unknown';
-  const img = it.stream_icon || it.cover || it.logo || '';
+  const img = usableArtwork(it.stream_icon || it.cover || it.logo || '');
   const rating = it.rating_5based ? (it.rating_5based * 2).toFixed(1) : (it.rating ? Number(it.rating).toFixed(1) : null);
   const faved = isFavorite(section, it);
 
-  // A real <img loading="lazy"> instead of an always-eager CSS
-  // background-image — with thousands of posters in a list, loading every
-  // single one immediately was saturating the connection and making all of
-  // them crawl in together instead of the visible ones appearing quickly.
+  // The poster URL is parked in data-src and only becomes a real request
+  // once the card is near the viewport (see observePosters). The browser's
+  // own lazy loading reaches much further ahead than that, which on a
+  // 69,000-item catalog means fetching artwork nobody is looking at.
   card.innerHTML = `
-    <div class="card-thumb">${img ? `<img src="${img}" loading="lazy" decoding="async" alt="" />` : escapeHtml(name)}
+    <div class="card-thumb">${img ? `<img data-src="${thumbUrl(img)}" decoding="async" alt="" />` : escapeHtml(name)}
       ${rating ? `<span class="card-rating">★ ${rating}</span>` : ''}
       <button class="card-fav${faved ? ' active' : ''}" title="Favorite">${faved ? '♥' : '♡'}</button>
     </div>
@@ -508,12 +782,14 @@ function showFavoritesView() {
   $$('.tb-tab').forEach((t) => t.classList.remove('active'));
   $('#cat-list').innerHTML = '';
   $('#item-search').value = '';
+  showItemGrid();
 
   const list = favoritesList();
   $('#content-title').textContent = 'Favorites';
   $('#content-sub').textContent = `${list.length} items`;
 
   const grid = $('#item-grid');
+  cancelPostersIn(grid);
   grid.innerHTML = '';
   if (!list.length) {
     grid.innerHTML = '<div class="empty-state">No favorites yet — tap the ♡ on any channel, movie or series.</div>';
@@ -521,6 +797,7 @@ function showFavoritesView() {
   }
 
   list.forEach((f) => grid.appendChild(renderCard(f.item, f.section)));
+  observePosters(grid);
 }
 
 // ===================== Search wiring =====================
@@ -546,6 +823,9 @@ function showHistoryView(kind) {
   $$('.tb-tab').forEach((t) => t.classList.remove('active'));
   $('#cat-list').innerHTML = '';
   $('#item-search').value = '';
+  // Coming from Live TV, its inline preview and channel list own the content
+  // area — without this the history title appears above the live channel list.
+  showItemGrid();
 
   const list = historyList();
   const items = kind === 'continue'
@@ -556,6 +836,7 @@ function showHistoryView(kind) {
   $('#content-sub').textContent = `${items.length} items`;
 
   const grid = $('#item-grid');
+  cancelPostersIn(grid);
   grid.innerHTML = '';
   if (!items.length) {
     grid.innerHTML = `<div class="empty-state">${kind === 'continue' ? 'Nothing in progress yet.' : 'Nothing watched yet.'}</div>`;
@@ -567,26 +848,35 @@ function showHistoryView(kind) {
     card.className = 'card' + (h.type === 'live' ? ' channel' : '');
     const pct = h.duration > 0 ? Math.min(100, (h.resumeAt / h.duration) * 100) : 0;
     card.innerHTML = `
-      <div class="card-thumb" style="${h.thumb ? `background-image:url('${h.thumb}')` : ''}">${h.thumb ? '' : escapeHtml(h.title)}</div>
+      <div class="card-thumb"${h.thumb ? ` data-bg="${thumbUrl(h.thumb)}"` : ''}>${h.thumb ? '' : escapeHtml(h.title)}</div>
       <div class="card-title">${escapeHtml(h.title)}</div>
       ${pct > 0 ? `<div class="card-progress"><div class="card-progress-fill" style="width:${pct.toFixed(0)}%"></div></div>` : ''}
     `;
-    card.addEventListener('click', () => openPlayer({
-      url: h.url, isLive: h.isLive, title: h.title, subtitle: h.subtitle, thumb: h.thumb,
-      type: h.type, historyKey: h.key, replay: h.replay, resumeAt: h.resumeAt
-    }));
+    card.addEventListener('click', () => {
+      state.episodeContext = null;
+      openPlayer({
+        url: h.url, isLive: h.isLive, title: h.title, subtitle: h.subtitle, thumb: h.thumb,
+        type: h.type, historyKey: h.key, replay: h.replay, resumeAt: h.resumeAt
+      });
+    });
     grid.appendChild(card);
   });
+  observePosters(grid);
+}
+
+function updateClock() {
+  const now = new Date();
+  const fmt = settings().timeFormat;
+  const opts = { hour: '2-digit', minute: '2-digit' };
+  if (fmt === '12') opts.hour12 = true;
+  if (fmt === '24') opts.hour12 = false;
+  $('#clock-time').textContent = now.toLocaleTimeString([], opts);
+  $('#clock-date').textContent = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 function initClock() {
-  const update = () => {
-    const now = new Date();
-    $('#clock-time').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    $('#clock-date').textContent = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-  };
-  update();
-  setInterval(update, 30000);
+  updateClock();
+  setInterval(updateClock, 30000);
 }
 
 function initLogout() {
@@ -601,84 +891,440 @@ function initLogout() {
   });
 }
 
-// ===================== Settings Modal =====================
-function initSettings() {
-  $('#btn-settings').addEventListener('click', openSettingsModal);
+// ===================== Settings =====================
+// Every control here is backed by state.store and read by the code that
+// actually does the work — nothing in this panel is decorative.
+const SETTINGS_DEFAULTS = {
+  quality: 'auto',
+  timeFormat: 'system',   // system | 12 | 24
+  startSection: 'live',   // live | movies | series
+  resume: true,
+  autoNextEpisode: true,
+  seekStep: 10,
+  theme: 'dark',          // dark | midnight | light
+  posterSize: 'normal',   // small | normal | large
+  adultFilter: false,
+  downloadWhileWatching: 'on', // on | off
+  audioLang: '',          // last audio language picked in the player
+  subtitleLang: ''        // last subtitle language picked ('' = off)
+};
+
+function settings() {
+  if (!state.store.settings) state.store.settings = {};
+  return Object.assign({}, SETTINGS_DEFAULTS, state.store.settings);
 }
 
-function openSettingsModal() {
-  if (document.getElementById('settings-modal')) return;
+async function setSetting(key, value) {
+  state.store.settings = state.store.settings || {};
+  state.store.settings[key] = value;
+  await saveStore();
+  applySettings();
+}
 
-  const overlay = document.createElement('div');
-  overlay.id = 'settings-modal';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:999;';
+// Pushes the stored preferences into the parts of the app that use them.
+function applySettings() {
+  const s = settings();
+  document.documentElement.setAttribute('data-theme', s.theme);
+  document.documentElement.setAttribute('data-poster', s.posterSize);
+  if (player) player.setQuality(s.quality);
+  updateClock();
+}
 
-  const acc = state.activeAccount || {};
-  const isXtream = acc.type === 'xtream';
+function initSettings() {
+  $('#btn-settings').addEventListener('click', () => openSettings('playlists'));
+}
 
-  overlay.innerHTML = `
-    <div style="width:420px;background:var(--bg-2);border:1px solid var(--border);border-radius:14px;padding:22px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <h3 style="font-size:16px;">Settings</h3>
-        <button id="settings-close" class="icon-btn">✕</button>
+const SETTINGS_SECTIONS = [
+  { id: 'playlists', label: 'Playlists', icon: '☰', blurb: 'Add, switch and manage sources.' },
+  { id: 'general', label: 'General', icon: '⚙', blurb: 'Defaults and playback behaviour.' },
+  { id: 'downloads', label: 'Downloads', icon: '⬇', blurb: 'Where downloads are saved, and what is downloading.' },
+  { id: 'appearance', label: 'Appearance', icon: '🎨', blurb: 'Theme and layout.' },
+  { id: 'backup', label: 'Backup', icon: '↥', blurb: 'Export or restore your setup.' },
+  { id: 'troubleshooting', label: 'Troubleshooting', icon: '🛟', blurb: 'Caches and diagnostics.' },
+  { id: 'about', label: 'About', icon: 'ⓘ', blurb: 'Version and storage.' }
+];
+
+function openSettings(sectionId = 'playlists') {
+  let overlay = document.getElementById('settings-modal');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'settings-modal';
+    overlay.className = 'settings-overlay';
+    overlay.innerHTML = `
+      <div class="settings-dialog">
+        <div class="settings-head">
+          <div>
+            <h3>Settings</h3>
+            <div class="settings-blurb" id="settings-blurb"></div>
+          </div>
+          <button id="settings-close" class="icon-btn">✕</button>
+        </div>
+        <div class="settings-body">
+          <nav class="settings-nav" id="settings-nav"></nav>
+          <div class="settings-pane" id="settings-pane"></div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    $('#settings-close').addEventListener('click', () => overlay.remove());
+
+    const nav = $('#settings-nav');
+    SETTINGS_SECTIONS.forEach((sec) => {
+      const btn = document.createElement('button');
+      btn.className = 'settings-nav-item';
+      btn.dataset.section = sec.id;
+      btn.innerHTML = `<span class="sn-ic">${sec.icon}</span> ${sec.label}`;
+      btn.addEventListener('click', () => openSettings(sec.id));
+      nav.appendChild(btn);
+    });
+  }
+
+  const meta = SETTINGS_SECTIONS.find((s) => s.id === sectionId) || SETTINGS_SECTIONS[0];
+  $('#settings-blurb').textContent = meta.blurb;
+  $$('.settings-nav-item').forEach((b) => b.classList.toggle('active', b.dataset.section === sectionId));
+
+  const pane = $('#settings-pane');
+  pane.innerHTML = '';
+  ({
+    playlists: renderPlaylistSettings,
+    general: renderGeneralSettings,
+    downloads: renderDownloadSettings,
+    appearance: renderAppearanceSettings,
+    backup: renderBackupSettings,
+    troubleshooting: renderTroubleshootingSettings,
+    about: renderAboutSettings
+  })[meta.id](pane);
+}
+
+function settingsCard(title, bodyHtml) {
+  return `<div class="settings-card"><div class="settings-card-title">${title}</div>${bodyHtml}</div>`;
+}
+
+function settingsRow(label, help, controlHtml) {
+  return `<div class="settings-row">
+      <div class="settings-row-text"><div class="sr-label">${label}</div><div class="sr-help">${help}</div></div>
+      <div class="settings-row-control">${controlHtml}</div>
+    </div>`;
+}
+
+function toggleHtml(id, on) {
+  return `<button class="settings-toggle${on ? ' on' : ''}" id="${id}" role="switch" aria-checked="${on}"><span></span></button>`;
+}
+
+function selectHtml(id, value, options) {
+  return `<select class="settings-select" id="${id}">${options
+    .map(([v, label]) => `<option value="${v}"${v === String(value) ? ' selected' : ''}>${label}</option>`)
+    .join('')}</select>`;
+}
+
+function bindToggle(id, key) {
+  const el = $(`#${id}`);
+  el.addEventListener('click', async () => {
+    const next = !el.classList.contains('on');
+    el.classList.toggle('on', next);
+    el.setAttribute('aria-checked', String(next));
+    await setSetting(key, next);
+  });
+}
+
+function bindSelect(id, key, transform = (v) => v) {
+  $(`#${id}`).addEventListener('change', async (e) => setSetting(key, transform(e.target.value)));
+}
+
+// ---- Playlists ----
+function renderPlaylistSettings(pane) {
+  const accounts = state.store.accounts || [];
+  const rows = accounts.map((acc) => {
+    const active = state.activeAccount && acc.id === state.activeAccount.id;
+    return `<div class="pls-row${active ? ' active' : ''}" data-id="${acc.id}">
+        <div class="pls-main">
+          <div class="pls-name">${escapeHtml(acc.name)} ${active ? '<span class="pls-badge">SELECTED</span>' : ''}</div>
+          <div class="pls-sub">${acc.type === 'xtream' ? 'Xtream Codes' : 'M3U'} · ${escapeHtml(acc.url)}</div>
+        </div>
+        <div class="pls-actions">
+          ${active ? '' : `<button class="btn-mini" data-act="use" data-id="${acc.id}">Use</button>`}
+          <button class="btn-mini danger" data-act="del" data-id="${acc.id}">Remove</button>
+        </div>
+      </div>`;
+  }).join('') || '<div class="settings-empty">No playlists yet — add one below.</div>';
+
+  pane.innerHTML =
+    settingsCard(`Your playlists (${accounts.length})`, rows) +
+    settingsCard('Add playlist', `
+      <div class="pls-tabs">
+        <button class="pls-tab active" data-kind="xtream">Xtream Codes</button>
+        <button class="pls-tab" data-kind="m3u">M3U URL</button>
       </div>
-
-      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Account</div>
-      <div style="background:var(--bg-3);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:16px;">
-        <div><strong>${escapeHtml(acc.name || acc.username || 'Playlist')}</strong></div>
-        ${isXtream ? `<div style="color:var(--text-dim);font-size:11px;margin-top:3px;">${escapeHtml(acc.url)}</div>` : ''}
+      <div id="pls-form-xtream">
+        <input class="settings-input" id="pls-x-url" placeholder="http://example.com:8080" />
+        <div class="pls-two">
+          <input class="settings-input" id="pls-x-user" placeholder="Username" />
+          <input class="settings-input" id="pls-x-pass" placeholder="Password" type="password" />
+        </div>
       </div>
+      <div id="pls-form-m3u" hidden>
+        <input class="settings-input" id="pls-m-name" placeholder="Playlist name (optional)" />
+        <input class="settings-input" id="pls-m-url" placeholder="http://example.com/playlist.m3u" />
+      </div>
+      <div class="pls-add-foot">
+        <span class="sr-help" id="pls-msg">Credentials are stored only on this device.</span>
+        <button class="btn-primary" id="pls-add">＋ Add Playlist</button>
+      </div>`);
 
-      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Playback quality</div>
-      <select id="settings-quality" style="width:100%;padding:9px 10px;background:var(--bg-3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin-bottom:16px;">
-        <option value="auto">Auto (recommended)</option>
-        <option value="480">480p</option>
-        <option value="720">720p (HD)</option>
-        <option value="1080">1080p (Full HD)</option>
-        <option value="2160">4K (2160p)</option>
-      </select>
+  pane.querySelectorAll('[data-act="use"]').forEach((b) => b.addEventListener('click', () => {
+    const acc = accounts.find((a) => a.id === b.dataset.id);
+    document.getElementById('settings-modal').remove();
+    if (acc) switchPlaylist(acc);
+  }));
 
-      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Data</div>
-      <button id="settings-refresh" class="btn-retry" style="width:100%;margin-bottom:8px;background:var(--bg-3);color:var(--text);">🔄 Refresh channels / movies / series</button>
-      <button id="settings-logout" class="btn-retry" style="width:100%;background:var(--danger);">🚪 Logout</button>
-
-      <div style="text-align:center;margin-top:16px;color:var(--text-dim);font-size:11px;" id="settings-version">Version -</div>
-    </div>
-  `;
-
-  document.body.appendChild(overlay);
-
-  $('#settings-quality').value = (state.store.settings && state.store.settings.quality) || 'auto';
-  window.api.getAppVersion().then((v) => { $('#settings-version').textContent = `Version ${v}`; }).catch(() => {});
-
-  const close = () => overlay.remove();
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  $('#settings-close').addEventListener('click', close);
-
-  $('#settings-quality').addEventListener('change', async (e) => {
-    state.store.settings = state.store.settings || {};
-    state.store.settings.quality = e.target.value;
+  pane.querySelectorAll('[data-act="del"]').forEach((b) => b.addEventListener('click', async () => {
+    const acc = accounts.find((a) => a.id === b.dataset.id);
+    if (!acc) return;
+    if (state.activeAccount && acc.id === state.activeAccount.id) {
+      alert('This playlist is in use. Switch to another one first.');
+      return;
+    }
+    if (!confirm(`Remove "${acc.name}"?`)) return;
+    state.store.accounts = state.store.accounts.filter((a) => a.id !== acc.id);
     await saveStore();
-    if (player) player.setQuality(e.target.value);
+    renderSavedAccounts();
+    openSettings('playlists');
+  }));
+
+  pane.querySelectorAll('.pls-tab').forEach((tab) => tab.addEventListener('click', () => {
+    pane.querySelectorAll('.pls-tab').forEach((t) => t.classList.toggle('active', t === tab));
+    $('#pls-form-xtream').hidden = tab.dataset.kind !== 'xtream';
+    $('#pls-form-m3u').hidden = tab.dataset.kind !== 'm3u';
+  }));
+
+  $('#pls-add').addEventListener('click', async () => {
+    const msg = $('#pls-msg');
+    const isXtream = !$('#pls-form-xtream').hidden;
+    let acc;
+    if (isXtream) {
+      let url = $('#pls-x-url').value.trim();
+      const user = $('#pls-x-user').value.trim();
+      const pass = $('#pls-x-pass').value.trim();
+      if (!url || !user || !pass) { msg.textContent = 'Server, username and password are all required.'; return; }
+      if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
+      if (state.store.accounts.some((a) => a.type === 'xtream' && a.url === url && a.username === user)) {
+        msg.textContent = 'That playlist is already added.';
+        return;
+      }
+      acc = { id: 'x_' + Date.now(), type: 'xtream', name: `${user} @ ${new URL(url).hostname}`, url, username: user, password: pass };
+    } else {
+      const url = $('#pls-m-url').value.trim();
+      if (!url) { msg.textContent = 'An M3U URL is required.'; return; }
+      if (state.store.accounts.some((a) => a.type === 'm3u' && a.url === url)) {
+        msg.textContent = 'That playlist is already added.';
+        return;
+      }
+      acc = { id: 'm_' + Date.now(), type: 'm3u', name: $('#pls-m-name').value.trim() || 'My Playlist', url };
+    }
+
+    // Only keep a playlist that actually connects, so a typo can't leave a
+    // dead entry behind in the switcher.
+    msg.textContent = 'Checking connection...';
+    try {
+      if (acc.type === 'xtream') await new XtreamClient(acc.url, acc.username, acc.password).authenticate();
+      else await parseM3U(acc.url);
+    } catch (err) {
+      msg.textContent = `Could not connect: ${err.message || 'check the details'}`;
+      return;
+    }
+    state.store.accounts.unshift(acc);
+    await saveStore();
+    renderSavedAccounts();
+    openSettings('playlists');
+  });
+}
+
+// ---- General ----
+function renderGeneralSettings(pane) {
+  const s = settings();
+  pane.innerHTML =
+    settingsCard('Startup', [
+      settingsRow('Opening section', 'Which tab the app lands on after it loads.',
+        selectHtml('set-start', s.startSection, [['live', 'Live TV'], ['movies', 'Movies'], ['series', 'Series']])),
+      settingsRow('Time format', 'Used by the clock in the top bar.',
+        selectHtml('set-time', s.timeFormat, [['system', 'Follow system'], ['12', '12-hour'], ['24', '24-hour']]))
+    ].join('')) +
+    settingsCard('Playback', [
+      settingsRow('Resume where you left off', 'Continue movies and episodes from your last position.',
+        toggleHtml('set-resume', s.resume)),
+      settingsRow('Auto-play next episode', 'When an episode ends, start the next one in the season.',
+        toggleHtml('set-autonext', s.autoNextEpisode)),
+      settingsRow('Skip amount', 'How far the ◀◀ / ▶▶ buttons and arrow keys jump.',
+        selectHtml('set-seekstep', s.seekStep, [['5', '5 seconds'], ['10', '10 seconds'], ['15', '15 seconds'], ['30', '30 seconds']])),
+      settingsRow('Default quality', 'Videos above this start scaled down to it; anything at or below plays at its original resolution.',
+        selectHtml('set-quality', s.quality, [['auto', 'Original (recommended)'], ['1080', 'Up to 1080p'], ['720', 'Up to 720p'], ['480', 'Up to 480p'], ['360', 'Up to 360p']]))
+    ].join('')) +
+    settingsCard('Content', [
+      settingsRow('Hide adult categories', 'Filters categories named XXX / adult out of every section.',
+        toggleHtml('set-adult', s.adultFilter))
+    ].join(''));
+
+  bindSelect('set-start', 'startSection');
+  bindSelect('set-time', 'timeFormat');
+  bindToggle('set-resume', 'resume');
+  bindToggle('set-autonext', 'autoNextEpisode');
+  bindSelect('set-seekstep', 'seekStep', (v) => parseInt(v, 10));
+  bindSelect('set-quality', 'quality');
+  $('#set-adult').addEventListener('click', async () => {
+    const el = $('#set-adult');
+    const next = !el.classList.contains('on');
+    el.classList.toggle('on', next);
+    await setSetting('adultFilter', next);
+    state.itemCache = {};
+    await switchSection(state.section);
+  });
+}
+
+// ---- Appearance ----
+function renderAppearanceSettings(pane) {
+  const s = settings();
+  pane.innerHTML =
+    settingsCard('Theme', `<div class="theme-grid">
+        ${[['dark', 'Dark'], ['midnight', 'Midnight'], ['light', 'Light']]
+          .map(([v, label]) => `<button class="theme-chip${s.theme === v ? ' active' : ''}" data-theme="${v}"><span class="tc-dot ${v}"></span>${label}</button>`)
+          .join('')}
+      </div>`) +
+    settingsCard('Grid', settingsRow('Poster size', 'How large the cards are in Movies and Series.',
+      selectHtml('set-poster', s.posterSize, [['small', 'Small'], ['normal', 'Normal'], ['large', 'Large']])));
+
+  pane.querySelectorAll('.theme-chip').forEach((chip) => chip.addEventListener('click', async () => {
+    pane.querySelectorAll('.theme-chip').forEach((c) => c.classList.toggle('active', c === chip));
+    await setSetting('theme', chip.dataset.theme);
+  }));
+  bindSelect('set-poster', 'posterSize');
+}
+
+// ---- Backup ----
+function renderBackupSettings(pane) {
+  pane.innerHTML =
+    settingsCard('Export', `
+      <div class="sr-help" style="margin-bottom:10px;">Saves playlists, favourites, watch history and settings to a file you can keep or move to another machine.</div>
+      <label class="settings-check"><input type="checkbox" id="bk-creds" /> Include playlist passwords</label>
+      <button class="btn-primary" id="bk-export" style="margin-top:12px;">Export backup…</button>`) +
+    settingsCard('Import', `
+      <div class="sr-help" style="margin-bottom:10px;">Restores from a backup file. Playlists are merged with what you already have; settings and history are replaced.</div>
+      <input type="file" id="bk-file" accept="application/json" class="settings-input" />
+      <div class="sr-help" id="bk-msg" style="margin-top:10px;"></div>`);
+
+  $('#bk-export').addEventListener('click', () => {
+    const withCreds = $('#bk-creds').checked;
+    const data = JSON.parse(JSON.stringify(state.store));
+    if (!withCreds) {
+      (data.accounts || []).forEach((a) => { delete a.password; });
+    }
+    data._exportedAt = new Date().toISOString();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `iptv-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   });
 
-  $('#settings-refresh').addEventListener('click', async () => {
+  $('#bk-file').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const msg = $('#bk-msg');
+    try {
+      const parsed = JSON.parse(await file.text());
+      if (!parsed || typeof parsed !== 'object') throw new Error('not a backup file');
+      const incoming = Array.isArray(parsed.accounts) ? parsed.accounts : [];
+      const existing = state.store.accounts || [];
+      const merged = existing.slice();
+      let added = 0;
+      incoming.forEach((acc) => {
+        const dup = merged.some((a) => a.type === acc.type && a.url === acc.url && a.username === acc.username);
+        if (!dup) { merged.push(acc); added++; }
+      });
+      state.store.accounts = merged;
+      if (parsed.settings) state.store.settings = parsed.settings;
+      if (Array.isArray(parsed.history)) state.store.history = parsed.history;
+      if (parsed.favorites) state.store.favorites = parsed.favorites;
+      await saveStore();
+      applySettings();
+      renderSavedAccounts();
+      updateHistoryBadges();
+      updateFavCount();
+      msg.textContent = `Imported — ${added} new playlist${added === 1 ? '' : 's'} added.`;
+    } catch (err) {
+      msg.textContent = `Could not import: ${err.message || 'unreadable file'}`;
+    }
+  });
+}
+
+// ---- Troubleshooting ----
+function renderTroubleshootingSettings(pane) {
+  pane.innerHTML =
+    settingsCard('Catalog', `
+      <div class="sr-help" style="margin-bottom:10px;">Channels, movies and series are kept for 10 minutes so relaunching is quick. Refresh if your provider just changed something.</div>
+      <button class="btn-primary" id="ts-refresh">🔄 Refresh catalog now</button>`) +
+    settingsCard('Video cache', `
+      <div class="sr-help" style="margin-bottom:10px;">While something plays it is cached on disk so seeking back is instant. It is cleared automatically when the app closes.</div>
+      <div class="sr-help" id="ts-cache">Checking…</div>
+      <button class="btn-primary" id="ts-clear" style="margin-top:12px;">Clear cached video</button>`) +
+    settingsCard('Recent playback failures', `<div id="ts-fails"></div>`);
+
+  const fails = (state.store.playbackFailures || []).slice(0, 8);
+  $('#ts-fails').innerHTML = fails.length
+    ? fails.map((f) => `<div class="ts-fail"><div class="pls-name">${escapeHtml(f.title || 'Unknown')}</div><div class="pls-sub">${escapeHtml(f.reason || '')} · ${new Date(f.at).toLocaleString()}</div></div>`).join('')
+    : '<div class="settings-empty">Nothing has failed to play.</div>';
+
+  const showCache = async () => {
+    try {
+      const info = await window.api.getCacheInfo();
+      $('#ts-cache').textContent = `${info.files} file${info.files === 1 ? '' : 's'} · ${(info.bytes / 1048576).toFixed(1)} MB on disk`;
+    } catch { $('#ts-cache').textContent = 'Cache size unavailable.'; }
+  };
+  showCache();
+
+  $('#ts-refresh').addEventListener('click', async () => {
     state.itemCache = {};
     state.liveCats = state.movieCats = state.seriesCats = null;
-    close();
+    window.api.setCatalog(null).catch(() => {});
+    await saveStore();
+    document.getElementById('settings-modal').remove();
     await switchSection(state.section);
   });
 
-  $('#settings-logout').addEventListener('click', () => {
-    close();
+  $('#ts-clear').addEventListener('click', async () => {
+    try { await window.api.clearVideoCache(); } catch {}
+    showCache();
+  });
+}
+
+// ---- About ----
+function renderAboutSettings(pane) {
+  pane.innerHTML =
+    settingsCard('This app', `
+      <div class="pls-name">MY IPTV</div>
+      <div class="pls-sub" id="ab-version">Version …</div>
+      <div class="sr-help" style="margin-top:10px;">Plays your own playlists. No channels or content are provided by the app.</div>`) +
+    settingsCard('Stored on this device', `<div class="sr-help" id="ab-storage">Counting…</div>`) +
+    settingsCard('Account', `<button class="btn-primary danger" id="ab-logout">🚪 Log out</button>`);
+
+  window.api.getAppVersion().then((v) => { $('#ab-version').textContent = `Version ${v}`; }).catch(() => {});
+  const accounts = (state.store.accounts || []).length;
+  const history = (state.store.history || []).length;
+  const favs = Object.values(state.store.favorites || {}).reduce((n, arr) => n + (arr || []).length, 0);
+  $('#ab-storage').textContent = `${accounts} playlist${accounts === 1 ? '' : 's'} · ${history} watched item${history === 1 ? '' : 's'} · ${favs} favourite${favs === 1 ? '' : 's'}`;
+
+  $('#ab-logout').addEventListener('click', () => {
+    document.getElementById('settings-modal').remove();
     $('#btn-logout').click();
   });
 }
 
 // ===================== Series Detail =====================
 async function openSeries(series) {
+  state.viewingDownloads = false;
   state.currentSeries = series;
   const grid = $('#item-grid');
+  cancelPostersIn(grid);
   grid.innerHTML = '<div class="loading-state"><div class="spinner"></div><div>Loading episodes...</div></div>';
 
   let info;
@@ -713,7 +1359,7 @@ async function openSeries(series) {
   grid.innerHTML = `
     <div style="grid-column:1/-1">
       <div class="series-detail">
-        <div class="series-poster" style="${series.cover ? `background-image:url('${series.cover}')` : ''}"></div>
+        <div class="series-poster" style="${series.cover ? `background-image:url('${thumbUrl(series.cover, 400)}')` : ''}"></div>
         <div class="series-info">
           <h2>${escapeHtml(series.name)}</h2>
           <p>${escapeHtml((info && info.info && info.info.plot) || '')}</p>
@@ -724,6 +1370,9 @@ async function openSeries(series) {
                 ? `▶ Play Next Episode`
                 : `▶ Play`}
           </button>
+          ${lastWatched && !isFinishedEp
+            ? `<button class="btn-series-play btn-series-restart" id="btn-series-restart">↺ Start New</button>`
+            : ''}
         </div>
       </div>
       <div class="season-tabs" id="season-tabs"></div>
@@ -742,7 +1391,14 @@ async function openSeries(series) {
 
   $('#btn-series-play').addEventListener('click', () => {
     if (lastWatched && !isFinishedEp) {
-      // Resume exactly where they left off.
+      // Resume exactly where they left off — and remember which season list
+      // that episode sits in, so the next one still follows on its own.
+      state.episodeContext = null;
+      for (const sNum of seasons) {
+        const eps = info.episodes[sNum] || [];
+        const index = eps.findIndex((ep) => lastWatched.url.includes(`/${ep.id}.`));
+        if (index >= 0) { state.episodeContext = { series, seasonNum: sNum, list: eps, index }; break; }
+      }
       openPlayer({
         url: lastWatched.url, isLive: false, type: 'episode',
         title: lastWatched.title, subtitle: lastWatched.subtitle, thumb: lastWatched.thumb,
@@ -757,24 +1413,68 @@ async function openSeries(series) {
     if (firstEp) playEpisode(firstEp, series, firstSeason);
   });
 
+  const restartBtn = $('#btn-series-restart');
+  if (restartBtn) {
+    restartBtn.addEventListener('click', () => {
+      // Ignore the saved progress entirely and start episode 1 from 0:00.
+      const firstSeason = seasons[0];
+      const firstEp = (info.episodes[firstSeason] || [])[0];
+      if (firstEp) playEpisode(firstEp, series, firstSeason, { resumeAt: 0 });
+    });
+  }
+
   function renderSeason(sNum) {
     seasonTabs.querySelectorAll('.season-tab').forEach((t) => t.classList.toggle('active', t.dataset.s === sNum));
     const eps = info.episodes[sNum] || [];
+    cancelPostersIn(episodeList);
     episodeList.innerHTML = '';
-    eps.forEach((ep) => {
+    const episodeMeta = (ep) => ({
+      url: state.client.seriesStreamUrl(ep.id, ep.container_extension || 'mp4'),
+      type: 'episode',
+      title: series.name,
+      seriesName: series.name,
+      subtitle: `Season ${sNum} - Episode ${ep.episode_num} - ${ep.title || ''}`,
+      thumb: series.cover || ''
+    });
+    if (state.client && eps.length) {
+      const bar = document.createElement('div');
+      bar.className = 'season-dl-bar';
+      bar.innerHTML = `<span>${eps.length} episode${eps.length === 1 ? '' : 's'}</span><button class="btn-mini" id="season-dl">⬇ Download season ${escapeHtml(String(sNum))}</button>`;
+      bar.querySelector('#season-dl').addEventListener('click', async () => {
+        const missing = eps.filter((ep) => !findDownload(episodeMeta(ep).url));
+        if (!missing.length) { toast('This whole season is already in Downloads.'); return; }
+        for (const ep of missing) await startDownload(episodeMeta(ep));
+        toast(`${missing.length} episode${missing.length === 1 ? '' : 's'} added to Downloads — they download one after another.`);
+      });
+      episodeList.appendChild(bar);
+    }
+    eps.forEach((ep, epIndex) => {
       const row = document.createElement('div');
       row.className = 'episode-row';
-      const thumb = (ep.info && ep.info.movie_image) || series.cover || '';
+      const thumb = usableArtwork((ep.info && ep.info.movie_image) || series.cover || '');
       row.innerHTML = `
-        <div class="episode-thumb" style="${thumb ? `background-image:url('${thumb}')` : ''}"></div>
+        <div class="episode-thumb"${thumb ? ` data-bg="${thumbUrl(thumb, 200)}"` : ''}></div>
         <div class="episode-meta">
           <div class="ep-title">S${sNum} E${ep.episode_num} - ${escapeHtml(ep.title || '')}</div>
           <div class="ep-sub">${ep.info && ep.info.duration ? ep.info.duration : ''}</div>
         </div>
+        ${state.client ? `<button class="icon-btn ep-dl" title="Download episode" data-url="${escapeHtml(episodeMeta(ep).url)}">⬇</button>` : ''}
       `;
-      row.addEventListener('click', () => playEpisode(ep, series, sNum));
+      const dlBtn = row.querySelector('.ep-dl');
+      if (dlBtn) {
+        dlBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const meta = episodeMeta(ep);
+          if (findDownload(meta.url)) { openSettings('downloads'); return; }
+          startDownload(meta);
+        });
+      }
+      row.addEventListener('click', () => playEpisode(ep, series, sNum, { list: eps, index: epIndex }));
       episodeList.appendChild(row);
     });
+    // Only the episodes actually on screen fetch their stills.
+    observePosters(episodeList);
+    updateEpisodeDownloadButtons();
   }
 
   seasons.forEach((sNum, i) => {
@@ -787,6 +1487,330 @@ async function openSeries(series) {
   });
 
   renderSeason(seasons[0]);
+}
+
+// ===================== Downloads =====================
+// Films and episodes saved to disk (see downloads.js). The main process
+// pushes the whole list about once a second while something downloads, and
+// every open view that shows downloads redraws from it.
+state.downloads = [];
+
+function fmtBytes(n) {
+  if (!n || n < 0) return '0 MB';
+  if (n >= 1073741824) return `${(n / 1073741824).toFixed(2)} GB`;
+  if (n >= 1048576) return `${(n / 1048576).toFixed(n >= 104857600 ? 0 : 1)} MB`;
+  return `${Math.max(1, Math.round(n / 1024))} KB`;
+}
+
+function fmtSpeed(bps) {
+  if (!bps) return '—';
+  return bps >= 1048576 ? `${(bps / 1048576).toFixed(1)} MB/s` : `${Math.round(bps / 1024)} KB/s`;
+}
+
+function fmtEta(sec) {
+  if (sec === null || sec === undefined || !isFinite(sec)) return '';
+  const s = Math.max(0, Math.round(sec));
+  if (s < 60) return `${s} sec left`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ${String(s % 60).padStart(2, '0')} sec left`;
+  return `${Math.floor(m / 60)} hr ${String(m % 60).padStart(2, '0')} min left`;
+}
+
+function downloadStatusText(d) {
+  const pct = `${Math.floor((d.progress || 0) * 100)}%`;
+  const sizes = d.totalBytes ? `${fmtBytes(d.receivedBytes)} of ${fmtBytes(d.totalBytes)}` : fmtBytes(d.receivedBytes);
+  switch (d.status) {
+    case 'downloading': return `Downloading · ${pct} · ${sizes} · ${fmtSpeed(d.speed)}${d.eta !== null ? ` · ${fmtEta(d.eta)}` : ''}`;
+    case 'waiting': return `Paused while you watch · ${pct} · ${sizes} — continues by itself afterwards`;
+    case 'queued': return d.receivedBytes ? `Waiting to continue · ${pct} · ${sizes}` : 'Waiting — starts after the current download';
+    case 'paused': return `Paused · ${pct} · ${sizes}`;
+    case 'failed': return `Failed — ${d.error || 'unknown error'}`;
+    case 'completed': return `Downloaded · ${fmtBytes(d.totalBytes || d.receivedBytes)}`;
+    default: return d.status;
+  }
+}
+
+function findDownload(url) {
+  return state.downloads.find((d) => d.url === url) || null;
+}
+
+let toastTimer = null;
+function toast(message) {
+  let el = document.getElementById('app-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'app-toast';
+    el.className = 'app-toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = message;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+async function startDownload(meta) {
+  if (!meta || !/^https?:/i.test(meta.url || '')) return;
+  const ext = ((meta.url.split('?')[0].match(/\.([a-z0-9]{2,4})$/i) || [])[1] || 'mp4').toLowerCase();
+  const res = await window.api.downloadsAdd({
+    url: meta.url, title: meta.title, subtitle: meta.subtitle || '', type: meta.type === 'episode' ? 'episode' : 'movie',
+    seriesName: meta.seriesName || (meta.type === 'episode' ? meta.title : ''), thumb: meta.thumb || '', ext
+  }).catch((err) => ({ ok: false, error: err.message }));
+  if (!res || !res.ok) { toast(res && res.error ? res.error : 'Could not start the download.'); return; }
+  const d = res.item;
+  toast(d.status === 'completed' ? 'Already downloaded — find it in Downloads.' : `Added to Downloads: ${d.title}${d.subtitle ? ` · ${d.subtitle}` : ''}`);
+}
+
+async function playDownload(d) {
+  const url = await window.api.downloadsFileUrl(d.id).catch(() => null);
+  if (!url) { toast('The downloaded file is missing — it may have been moved or deleted.'); return; }
+  state.episodeContext = null;
+  openPlayer({
+    url, isLive: false, type: d.type, title: d.title, subtitle: d.subtitle, thumb: d.thumb,
+    historyKey: `download:${d.id}`, local: true
+  });
+}
+
+async function removeDownload(d) {
+  if (d.status === 'completed') {
+    if (!confirm(`Delete "${d.title}${d.subtitle ? ` · ${d.subtitle}` : ''}" from this computer?`)) return;
+    await window.api.downloadsRemove(d.id, true);
+  } else {
+    await window.api.downloadsRemove(d.id, false);
+  }
+}
+
+function downloadRowHtml(d) {
+  const pct = Math.floor((d.progress || 0) * 100);
+  const running = d.status === 'downloading' || d.status === 'queued' || d.status === 'waiting';
+  const art = usableArtwork(d.thumb);
+  return `<div class="dl-row status-${d.status}" data-id="${d.id}">
+      <div class="dl-thumb"${art ? ` style="background-image:url('${thumbUrl(art, 160)}')"` : ''}></div>
+      <div class="dl-main">
+        <div class="dl-title">${escapeHtml(d.title)}${d.subtitle ? ` <span class="dl-sub">· ${escapeHtml(d.subtitle)}</span>` : ''}</div>
+        <div class="dl-status">${escapeHtml(downloadStatusText(d))}</div>
+        ${d.status !== 'completed' ? `<div class="dl-bar"><div class="dl-bar-fill" style="width:${pct}%"></div></div>` : ''}
+      </div>
+      <div class="dl-actions">
+        ${d.status === 'completed' ? '<button class="btn-mini" data-act="play">▶ Play</button><button class="btn-mini" data-act="folder">Show in folder</button>' : ''}
+        ${running ? '<button class="btn-mini" data-act="pause">Pause</button>' : ''}
+        ${d.status === 'paused' || d.status === 'failed' ? `<button class="btn-mini" data-act="resume">${d.status === 'failed' ? 'Retry' : 'Resume'}</button>` : ''}
+        <button class="btn-mini danger" data-act="remove" title="${d.status === 'completed' ? 'Delete' : 'Cancel'}">${d.status === 'completed' ? 'Delete' : 'Cancel'}</button>
+      </div>
+    </div>`;
+}
+
+// Redraws a list of download rows. While only numbers change (the usual
+// once-a-second update) the rows are patched in place, so buttons don't get
+// swapped out from under the pointer.
+function fillDownloadRows(host, list) {
+  const rows = [...host.querySelectorAll('.dl-row')];
+  const sameShape = rows.length === list.length
+    && rows.every((row, i) => row.dataset.id === list[i].id && row.classList.contains('status-' + list[i].status));
+  if (sameShape && rows.length) {
+    rows.forEach((row, i) => {
+      const d = list[i];
+      const status = row.querySelector('.dl-status');
+      if (status) status.textContent = downloadStatusText(d);
+      const fill = row.querySelector('.dl-bar-fill');
+      if (fill) fill.style.width = Math.floor((d.progress || 0) * 100) + '%';
+    });
+    return false;
+  }
+  return true;
+}
+
+function wireDownloadRows(root) {
+  root.querySelectorAll('.dl-row [data-act]').forEach((btn) => btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const d = state.downloads.find((x) => x.id === btn.closest('.dl-row').dataset.id);
+    if (!d) return;
+    const act = btn.dataset.act;
+    if (act === 'play') {
+      const modal = document.getElementById('settings-modal');
+      if (modal) modal.remove();
+      playDownload(d);
+    } else if (act === 'folder') window.api.downloadsOpenFolder(d.id);
+    else if (act === 'pause') window.api.downloadsPause(d.id);
+    else if (act === 'resume') window.api.downloadsResume(d.id);
+    else if (act === 'remove') removeDownload(d);
+  }));
+}
+
+// Whether a download keeps running while something plays online. Even on a
+// one-connection account this holds up in practice: the provider now and
+// then drops the download's connection, which reconnects by itself within a
+// second and carries on from the same byte, while the film keeps playing
+// (measured: 150 s of playback with a seek, no stall, download continuing
+// at roughly half speed). "off" is there for providers stricter than that.
+function downloadWhileWatchingActive() {
+  return settings().downloadWhileWatching !== 'off';
+}
+
+function applyDownloadPolicy() {
+  if (window.api.downloadsSetConcurrent) window.api.downloadsSetConcurrent(downloadWhileWatchingActive()).catch(() => {});
+}
+
+// Settings → Downloads
+function renderDownloadSettings(pane) {
+  pane.innerHTML =
+    settingsCard('Download location', `
+      <div class="dl-path" id="dl-path">…</div>
+      <div class="dl-path-actions">
+        <button class="btn-mini" id="dl-change">Change folder…</button>
+        <button class="btn-mini" id="dl-open">Open folder</button>
+      </div>
+      <div class="sr-help" style="margin-top:10px;">Movies and episodes are saved here, to watch later without internet from <b>Downloads</b> in the sidebar.
+        One download runs at a time, at the full speed your connection to the provider gives; more are queued and start by themselves.</div>`) +
+    settingsCard('While watching online', `
+      ${settingsRow('Keep downloading while watching',
+        `Your account allows <b>${state.maxConnections || 1}</b> connection${(state.maxConnections || 1) === 1 ? '' : 's'} at a time. `
+          + 'Downloads keep going while you watch; the speed is shared with the video, and if the provider briefly drops the download it reconnects by itself. '
+          + 'If videos ever stall while something downloads, turn this off — downloads then pause while you watch and continue afterwards.',
+        toggleHtml('dl-while', downloadWhileWatchingActive()))}`) +
+    settingsCard('Downloads', '<div id="dl-settings-list"></div>');
+
+  window.api.downloadsGetDir().then((dir) => { const el = document.getElementById('dl-path'); if (el) el.textContent = dir; }).catch(() => {});
+  $('#dl-change').addEventListener('click', async () => {
+    const res = await window.api.downloadsChooseDir().catch(() => null);
+    if (!res) return;
+    const el = document.getElementById('dl-path');
+    if (el) el.textContent = res.dir;
+    if (res.error) toast(res.error);
+    else if (res.ok) toast('Download folder changed.');
+  });
+  $('#dl-open').addEventListener('click', () => window.api.downloadsOpenFolder(null));
+  $('#dl-while').addEventListener('click', async () => {
+    const el = $('#dl-while');
+    const next = !el.classList.contains('on');
+    el.classList.toggle('on', next);
+    el.setAttribute('aria-checked', String(next));
+    await setSetting('downloadWhileWatching', next ? 'on' : 'off');
+    applyDownloadPolicy();
+  });
+  renderDownloadSettingsList();
+}
+
+function renderDownloadSettingsList() {
+  const host = document.getElementById('dl-settings-list');
+  if (!host) return;
+  if (state.downloads.length && !fillDownloadRows(host, state.downloads)) return;
+  host.innerHTML = state.downloads.length
+    ? state.downloads.map(downloadRowHtml).join('')
+    : '<div class="settings-empty">Nothing downloaded yet. Use ⬇ in the player, or on an episode, to save it for later.</div>';
+  wireDownloadRows(host);
+}
+
+// Sidebar → Downloads
+function showDownloadsView() {
+  $$('.sb-quick').forEach((el) => el.classList.remove('active'));
+  document.getElementById('sb-downloads').classList.add('active');
+  $$('.tb-tab').forEach((t) => t.classList.remove('active'));
+  $('#cat-list').innerHTML = '';
+  $('#item-search').value = '';
+  showItemGrid();
+  state.viewingDownloads = true;
+  renderDownloadsView();
+}
+
+function renderDownloadsView() {
+  const grid = $('#item-grid');
+  if (!state.viewingDownloads || !grid) return;
+  const list = state.downloads;
+  $('#content-title').textContent = 'Downloads';
+  const done = list.filter((d) => d.status === 'completed').length;
+  $('#content-sub').textContent = `${done} ready to watch offline${list.length > done ? ` · ${list.length - done} in progress` : ''}`;
+  const existing = grid.querySelector('.dl-view');
+  if (existing && list.length && !fillDownloadRows(existing, list)) return;
+  cancelPostersIn(grid);
+  grid.innerHTML = list.length
+    ? `<div class="dl-view">${list.map(downloadRowHtml).join('')}</div>`
+    : '<div class="empty-state">Nothing downloaded yet — use ⬇ in the player, or on an episode, to save it for watching offline.</div>';
+  wireDownloadRows(grid);
+  grid.querySelectorAll('.dl-row.status-completed').forEach((row) => row.addEventListener('click', () => {
+    const d = state.downloads.find((x) => x.id === row.dataset.id);
+    if (d) playDownload(d);
+  }));
+}
+
+// The ⬇ button in the player's top bar reflects the current title.
+function updatePlayerDownloadButton() {
+  const btn = document.getElementById('p-download');
+  if (!btn) return;
+  const meta = state.nowPlaying;
+  const eligible = meta && !meta.isLive && !meta.local && /^https?:/i.test(meta.url || '');
+  btn.hidden = !eligible;
+  if (!eligible) return;
+  const d = findDownload(meta.url);
+  btn.classList.toggle('active', !!d);
+  if (!d) { btn.textContent = '⬇'; btn.title = 'Download to watch offline'; return; }
+  if (d.status === 'completed') { btn.textContent = '✓'; btn.title = 'Downloaded'; return; }
+  btn.textContent = `${Math.floor((d.progress || 0) * 100)}%`;
+  btn.title = downloadStatusText(d);
+}
+
+// Episode rows show their own download state.
+function updateEpisodeDownloadButtons() {
+  document.querySelectorAll('.ep-dl[data-url]').forEach((btn) => {
+    const d = findDownload(btn.dataset.url);
+    btn.classList.toggle('active', !!d);
+    btn.textContent = !d ? '⬇' : d.status === 'completed' ? '✓' : `${Math.floor((d.progress || 0) * 100)}%`;
+    btn.title = !d ? 'Download episode' : downloadStatusText(d);
+  });
+}
+
+function applyDownloadsUpdate(list) {
+  state.downloads = Array.isArray(list) ? list : [];
+  const count = document.getElementById('dl-count');
+  if (count) count.textContent = state.downloads.length;
+  renderDownloadSettingsList();
+  renderDownloadsView();
+  updatePlayerDownloadButton();
+  updateEpisodeDownloadButtons();
+  updateTopbarDownloadsButton();
+}
+
+// The topbar button is always visible (so it's obvious where downloads live
+// even with nothing queued yet) and blinks red while something is actively
+// downloading, so progress is visible from anywhere in the app, not just
+// the Downloads screen or the player.
+function updateTopbarDownloadsButton() {
+  const btn = document.getElementById('tb-downloads');
+  const dot = document.getElementById('tb-downloads-dot');
+  if (!btn || !dot) return;
+  const active = state.downloads.some((d) => d.status === 'downloading');
+  const queued = state.downloads.some((d) => d.status === 'queued' || d.status === 'waiting');
+  dot.hidden = !(active || queued);
+  btn.classList.toggle('blinking', active);
+  const done = state.downloads.filter((d) => d.status === 'completed').length;
+  btn.title = active
+    ? 'Downloading…'
+    : queued
+      ? 'Waiting to download'
+      : done
+        ? `Downloads (${done} ready to watch offline)`
+        : 'Downloads';
+}
+
+function initDownloads() {
+  $('#sb-downloads').addEventListener('click', showDownloadsView);
+  $('#tb-downloads').addEventListener('click', () => {
+    const modal = document.getElementById('settings-modal');
+    if (modal) modal.remove();
+    if (state.nowPlaying) { stopHistoryTracking(); if (player) player.destroy(); state.nowPlaying = null; }
+    showView('app');
+    showDownloadsView();
+  });
+  $('#p-download').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const meta = state.nowPlaying;
+    if (!meta) return;
+    const d = findDownload(meta.url);
+    if (d) { openSettings('downloads'); return; }
+    startDownload(meta);
+  });
+  window.api.onDownloadsUpdate(applyDownloadsUpdate);
+  window.api.downloadsList().then(applyDownloadsUpdate).catch(() => {});
 }
 
 // ===================== Playback =====================
@@ -808,6 +1832,7 @@ function renderLiveList() {
 
   $('#content-sub').textContent = `${items.length} channels`;
   const list = $('#live-list');
+  cancelPostersIn(list);
   list.innerHTML = '';
   liveListRowsByKey.clear();
 
@@ -823,7 +1848,7 @@ function renderLiveList() {
     row.className = 'live-row' + (isActive ? ' active' : '');
     const faved = isFavorite('live', ch);
     row.innerHTML = `
-      <div class="live-row-logo" style="${ch.stream_icon ? `background-image:url('${ch.stream_icon}')` : ''}"></div>
+      <div class="live-row-logo"${ch.stream_icon ? ` data-bg="${thumbUrl(ch.stream_icon, 160)}"` : ''}></div>
       <div class="live-row-name">${escapeHtml(ch.name)}</div>
       ${ch.stream_icon ? '' : '<span class="live-row-badge">TV</span>'}
       <button class="live-row-fav${faved ? ' active' : ''}" title="Favorite">${faved ? '♥' : '♡'}</button>
@@ -841,6 +1866,9 @@ function renderLiveList() {
     frag.appendChild(row);
   });
   list.appendChild(frag);
+  // The channel list scrolls inside its own panel, so that panel is what
+  // decides which logos are on screen.
+  observePosters(list, list.closest('.live-list-wrap'));
 }
 
 let liveInlineWired = false;
@@ -878,6 +1906,7 @@ function expandLiveToFullscreen() {
   $('#p-np-sub').textContent = 'Live TV';
   $('#p-np-thumb').style.backgroundImage = ch.stream_icon ? `url('${ch.stream_icon}')` : '';
   $('#p-fav').textContent = isFavorite('live', ch) ? '♥' : '♡';
+  updatePlayerDownloadButton();
   $('#p-center-status').classList.remove('show');
   showView('player');
 }
@@ -922,6 +1951,7 @@ function stopLivePreview() {
 }
 
 function playLive(channel) {
+  state.episodeContext = null;
   const url = state.client
     ? state.client.liveStreamUrl(channel.stream_id, 'm3u8')
     : channel.url;
@@ -938,6 +1968,7 @@ function playLive(channel) {
 }
 
 function playMovie(movie) {
+  state.episodeContext = null; // auto-next only ever follows an episode list
   const ext = movie.container_extension || 'mp4';
   const url = state.client
     ? state.client.vodStreamUrl(movie.stream_id, ext)
@@ -954,16 +1985,20 @@ function playMovie(movie) {
   });
 }
 
-function playEpisode(ep, series, seasonNum) {
+function playEpisode(ep, series, seasonNum, opts = {}) {
   const ext = ep.container_extension || 'mp4';
   const url = state.client.seriesStreamUrl(ep.id, ext);
+  // Remembered so playback can roll into the next episode on its own.
+  state.episodeContext = { series, seasonNum, list: opts.list || null, index: opts.index };
   openPlayer({
     url,
     isLive: false,
     type: 'episode',
     title: series.name,
     subtitle: `Season ${seasonNum} - Episode ${ep.episode_num} - ${ep.title || ''}`,
-    thumb: series.cover || ''
+    seriesName: series.name,
+    thumb: series.cover || '',
+    ...('resumeAt' in opts ? { resumeAt: opts.resumeAt } : {})
   });
 }
 
@@ -976,6 +2011,7 @@ function openPlayer(meta) {
   }
 
   state.nowPlaying = meta;
+  updatePlayerDownloadButton();
   showView('player');
 
   // The shared <video> may currently be docked in the Live TV inline
@@ -996,15 +2032,21 @@ function openPlayer(meta) {
   player.onStateChange = fullscreenStateHandler;
   const quality = (state.store.settings && state.store.settings.quality) || 'auto';
   player.setQuality(quality);
+  player.preferredAudioLang = settings().audioLang || '';
+  player.preferredSubtitleLang = settings().subtitleLang || '';
 
   // Reset seekbar so old video's time/duration doesn't linger during load.
   $('#p-time-cur').textContent = '00:00';
   $('#p-time-total').textContent = '00:00';
   $('#p-seek').value = 0;
   $('#p-seek-played').style.width = '0%';
-  $('#p-seek-buffered').style.width = '0%';
+  $('#p-seek-buffered').innerHTML = '';
 
-  player.play(meta.url, { isLive: meta.isLive });
+  // The saved position goes to the player up front, so the stream opens
+  // right there instead of starting at 0:00 and jumping once it loads.
+  const startAt = !meta.isLive && settings().resume && meta.resumeAt > 5 ? meta.resumeAt : 0;
+  meta._resumed = true;
+  player.play(meta.url, { isLive: meta.isLive, startAt });
 
   if (!meta.isLive) startHistoryTracking(meta);
 }
@@ -1064,6 +2106,24 @@ function inlineLiveStateHandler(status, extra) {
   }
 }
 
+let seekDragging = false;
+
+// Leaving the player screen (Back / Stop). Fullscreen and picture-in-picture
+// are closed first: the fullscreen element lives inside the player screen,
+// so hiding that screen while still fullscreen left a black window over the
+// app that only Esc got rid of — which looked like the app had frozen.
+function leavePlayer() {
+  seekDragging = false;
+  const menu = document.getElementById('quality-menu');
+  if (menu) menu.remove();
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
+  stopHistoryTracking();
+  if (player) player.destroy();
+  state.nowPlaying = null;
+  showView('app');
+}
+
 async function initPlayer() {
   const video = $('#video');
   player = new PlayerController(video);
@@ -1077,7 +2137,23 @@ async function initPlayer() {
   video.addEventListener('play', () => { $('#p-playpause').textContent = '⏸'; });
   video.addEventListener('pause', () => { $('#p-playpause').textContent = '▶'; });
 
+  video.addEventListener('ended', () => {
+    if (!settings().autoNextEpisode) return;
+    const ctx = state.episodeContext;
+    if (!ctx || !ctx.list || typeof ctx.index !== 'number') return;
+    const next = ctx.list[ctx.index + 1];
+    if (!next) return;
+    stopHistoryTracking();
+    playEpisode(next, ctx.series, ctx.seasonNum, { list: ctx.list, index: ctx.index + 1, resumeAt: 0 });
+  });
+  // Waiting for the media element's own play/pause event to redraw the
+  // button made every press feel late, because that event only arrives once
+  // the decoder has actually reacted. The press is redrawn immediately and
+  // the events above still correct it if playback refuses to start.
+  video.addEventListener('waiting', () => { $('#p-playpause').textContent = video.paused ? '▶' : '⏸'; });
+
   video.addEventListener('timeupdate', () => {
+    $('#p-subs').classList.toggle('active', !!player && player._subIndex >= 0);
     const isLive = state.nowPlaying && state.nowPlaying.isLive;
     const dur = player ? player.getDisplayDuration() : video.duration;
     if (isLive || !isFinite(dur)) {
@@ -1086,67 +2162,77 @@ async function initPlayer() {
       $('#p-seek').value = 0;
       $('#p-seek').disabled = true;
       $('#p-seek-played').style.width = '0%';
-      $('#p-seek-buffered').style.width = '0%';
+      $('#p-seek-buffered').innerHTML = '';
       return;
     }
     $('#p-seek').disabled = false;
-    const cur = player ? player.getDisplayCurrentTime() : video.currentTime;
-    $('#p-time-cur').textContent = fmtTime(cur);
     $('#p-time-total').textContent = fmtTime(dur);
     $('#p-seek').max = dur || 0;
+    if (seekDragging) return; // don't yank the handle out from under the pointer
+    const cur = player ? player.getDisplayCurrentTime() : video.currentTime;
+    $('#p-time-cur').textContent = fmtTime(cur);
     $('#p-seek').value = Math.min(cur, dur);
     $('#p-seek-played').style.width = `${Math.min(100, (cur / dur) * 100)}%`;
   });
 
   let _bufferPollTimer = null;
+  // Draws every buffered span, not just one bar up to the playhead. What the
+  // player holds IS the region a seek lands in without any wait, so showing
+  // it exactly tells you how far ahead you can jump for free — and after a
+  // jump the earlier span stays drawn, because going back there is free too.
   const updateBuffered = () => {
+    const host = $('#p-seek-buffered');
     const dur = player ? player.getDisplayDuration() : video.duration;
-    if (!isFinite(dur) || dur <= 0) {
-      $('#p-seek-buffered').style.width = '0%';
-      return;
+    if (!isFinite(dur) || dur <= 0) { host.innerHTML = ''; return; }
+
+    const offset = (player && player._seekOffset) || 0;
+    const spans = [];
+    for (let i = 0; i < video.buffered.length; i++) {
+      const from = offset + video.buffered.start(i);
+      const to = offset + video.buffered.end(i);
+      if (to <= from) continue;
+      spans.push([Math.max(0, from / dur) * 100, Math.min(100, to / dur) * 100]);
     }
-    let bufferedEnd = 0;
-    const cur = video.currentTime;
-    if (video.buffered && video.buffered.length > 0) {
-      for (let i = 0; i < video.buffered.length; i++) {
-        if (video.buffered.start(i) <= cur + 1) {
-          bufferedEnd = Math.max(bufferedEnd, video.buffered.end(i));
-        }
-      }
-    }
-    if (player && player._stage && player._stage.startsWith('proxy')) {
-      const offset = player._seekOffset || 0;
-      const total = offset + bufferedEnd;
-      if (total > 0 && dur > 0) {
-        $('#p-seek-buffered').style.width = `${Math.min(100, (total / dur) * 100)}%`;
-      }
-    } else {
-      if (bufferedEnd > 0 && dur > 0) {
-        $('#p-seek-buffered').style.width = `${Math.min(100, (bufferedEnd / dur) * 100)}%`;
-      }
-    }
+
+    host.innerHTML = spans
+      .map(([a, b]) => `<span style="left:${a.toFixed(3)}%;width:${Math.max(0, b - a).toFixed(3)}%"></span>`)
+      .join('');
   };
   video.addEventListener('progress', updateBuffered);
   video.addEventListener('timeupdate', updateBuffered);
   if (_bufferPollTimer) clearInterval(_bufferPollTimer);
   _bufferPollTimer = setInterval(updateBuffered, 1000);
 
+  // Dragging only previews the position; the seek happens once, on release.
+  // Seeking on every step of a drag used to open (and immediately abandon)
+  // a new stream per pixel, and the last one often lost the race — playback
+  // then carried on from somewhere else entirely.
   $('#p-seek').addEventListener('input', (e) => {
-    if (isFinite(video.duration) && !(state.nowPlaying && state.nowPlaying.isLive)) {
-      const target = Number(e.target.value);
-      if (player && player._stage && player._stage.startsWith('proxy')) {
-        player.seekTo(target);
-      } else {
-        video.currentTime = target;
-      }
-    }
+    seekDragging = true;
+    const dur = player ? player.getDisplayDuration() : video.duration;
+    if (!isFinite(dur) || dur <= 0) return;
+    const target = Number(e.target.value);
+    $('#p-time-cur').textContent = fmtTime(target);
+    $('#p-seek-played').style.width = `${Math.min(100, (target / dur) * 100)}%`;
+  });
+  $('#p-seek').addEventListener('change', (e) => {
+    seekDragging = false;
+    if (state.nowPlaying && state.nowPlaying.isLive) return;
+    const dur = player ? player.getDisplayDuration() : video.duration;
+    if (!isFinite(dur) || dur <= 0) return;
+    const target = Number(e.target.value);
+    if (player) player.seekTo(target);
+    else video.currentTime = target;
   });
 
-  $('#p-playpause').addEventListener('click', () => player.togglePlayPause());
-  $('#p-rw').addEventListener('click', () => player.seekRelative(-10));
-  $('#p-fw').addEventListener('click', () => player.seekRelative(10));
-  $('#p-stop').addEventListener('click', () => { stopHistoryTracking(); player.destroy(); showView('app'); });
-  $('#p-back').addEventListener('click', () => { stopHistoryTracking(); player.destroy(); showView('app'); });
+  $('#p-playpause').addEventListener('click', () => {
+    const { playing } = player.togglePlayPause();
+    $('#p-playpause').textContent = playing ? '⏸' : '▶';
+  });
+  $('#p-rw').addEventListener('click', () => skipBy(-settings().seekStep));
+  $('#p-fw').addEventListener('click', () => skipBy(settings().seekStep));
+  $('#p-stop').addEventListener('click', leavePlayer);
+  $('#p-back').addEventListener('click', leavePlayer);
 
   $('#p-vol').addEventListener('input', (e) => player.setVolume(Number(e.target.value)));
   $('#p-vol-btn').addEventListener('click', () => {
@@ -1162,10 +2248,60 @@ async function initPlayer() {
     $('#p-speed').textContent = speeds[speedIdx] + 'x';
   });
 
-  $('#p-fullscreen').addEventListener('click', () => {
+  const toggleFullscreen = () => {
     const wrap = $('#player-wrap');
     if (!document.fullscreenElement) wrap.requestFullscreen().catch(() => {});
     else document.exitFullscreen();
+  };
+  $('#p-fullscreen').addEventListener('click', toggleFullscreen);
+  // Double-clicking the picture is what people reach for first.
+  $('#player-wrap').addEventListener('dblclick', (e) => {
+    if (e.target.closest('.player-overlay')) return; // let the controls be
+    toggleFullscreen();
+  });
+
+  $('#p-settings').addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleQualityMenu();
+  });
+  // The music-note button opens the same menu scrolled to its Audio part.
+  $('#p-audio').addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleQualityMenu();
+    const menu = document.getElementById('quality-menu');
+    const head = menu && [...menu.querySelectorAll('.qm-head')].find((h) => h.textContent === 'Audio');
+    if (head) head.scrollIntoView({ block: 'start' });
+    else if (menu && !player.getAudioOptions().length) {
+      menu.insertAdjacentHTML('beforeend', '<div class="qm-sep"></div><div class="qm-head">Audio</div><div class="qm-empty">This video has a single audio track.</div>');
+    }
+  });
+  // The speech-bubble button switches subtitles on (in the language last
+  // used, else the first available) and off again.
+  $('#p-subs').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const options = player.getSubtitleOptions();
+    if (!options.length) {
+      toggleQualityMenu();
+      const menu = document.getElementById('quality-menu');
+      if (menu) menu.insertAdjacentHTML('beforeend', '<div class="qm-sep"></div><div class="qm-head">Subtitles</div><div class="qm-empty">No subtitles in this video.</div>');
+      return;
+    }
+    const on = options.find((o) => o.active && o.id >= 0);
+    if (on) {
+      player.selectSubtitle(-1);
+      player.preferredSubtitleLang = '';
+      setSetting('subtitleLang', '');
+    } else {
+      const pick = options.find((o) => o.id >= 0 && o.lang && o.lang === settings().subtitleLang) || options.find((o) => o.id >= 0);
+      player.selectSubtitle(pick.id);
+      player.preferredSubtitleLang = pick.lang || '';
+      setSetting('subtitleLang', pick.lang || '');
+    }
+    $('#p-subs').classList.toggle('active', !on);
+  });
+  document.addEventListener('click', (e) => {
+    const menu = document.getElementById('quality-menu');
+    if (menu && !menu.contains(e.target)) menu.remove();
   });
 
   $('#p-pip').addEventListener('click', async () => {
@@ -1173,6 +2309,14 @@ async function initPlayer() {
       if (document.pictureInPictureElement) await document.exitPictureInPicture();
       else await video.requestPictureInPicture();
     } catch {}
+  });
+
+  // Leaving the mini window (its expand button, or closing it) hands the
+  // video back to the app, so the app should come forward with it rather
+  // than staying buried behind whatever the user had open.
+  video.addEventListener('leavepictureinpicture', () => {
+    window.api.focusWindow().catch(() => {});
+    showOverlay();
   });
 
   // The floating Picture-in-Picture window is drawn by Chromium itself, not
@@ -1187,7 +2331,7 @@ async function initPlayer() {
     navigator.mediaSession.setActionHandler('seekforward', () => player.seekRelative(10));
     try {
       navigator.mediaSession.setActionHandler('seekto', (details) => {
-        if (details.seekTime != null && isFinite(video.duration)) video.currentTime = details.seekTime;
+        if (details.seekTime != null) player.seekTo(details.seekTime);
       });
     } catch { /* not supported on all Chromium versions */ }
   }
@@ -1217,10 +2361,16 @@ async function initPlayer() {
     const view = document.getElementById('view-player');
     if (!view || !view.classList.contains('active')) return;
     switch (e.key) {
-      case 'ArrowRight': e.preventDefault(); player.seekRelative(10); showOverlay(); break;
-      case 'ArrowLeft': e.preventDefault(); player.seekRelative(-10); showOverlay(); break;
-      case ' ': e.preventDefault(); player.togglePlayPause(); showOverlay(); break;
-      case 'f': case 'F':
+      case 'ArrowRight': e.preventDefault(); skipBy(settings().seekStep); showOverlay(); break;
+      case 'ArrowLeft': e.preventDefault(); skipBy(-settings().seekStep); showOverlay(); break;
+      case ' ': {
+        e.preventDefault();
+        const { playing } = player.togglePlayPause();
+        $('#p-playpause').textContent = playing ? '⏸' : '▶';
+        showOverlay();
+        break;
+      }
+      case 'f': case 'F': case 'F11':
         e.preventDefault();
         if (!document.fullscreenElement) $('#player-wrap').requestFullscreen().catch(() => {});
         else document.exitFullscreen();
@@ -1233,29 +2383,90 @@ async function initPlayer() {
     }
   });
 
+  // Resuming is handled by openPlayer passing the saved position straight to
+  // player.play(), which opens the stream at that point.
   video.addEventListener('loadedmetadata', () => {
     const h = video.videoHeight;
     $('#p-quality').textContent = h > 0 ? `${h}p` : '-';
-
-    // Resume where we left off, once per playback (guarded by a flag on
-    // nowPlaying so a mid-stream ffmpeg-fallback reload doesn't re-seek).
-    // Goes through player.seekTo() rather than setting video.currentTime
-    // directly — a proxied (ffmpeg) stream can only "seek" by restarting
-    // at the target timestamp, which seekTo() knows how to do; the native
-    // path still just assigns currentTime under the hood.
-    const meta = state.nowPlaying;
-    const dur = player.getDisplayDuration();
-    if (meta && !meta.isLive && meta.resumeAt > 5 && !meta._resumed && isFinite(dur)) {
-      if (meta.resumeAt < dur * 0.97) {
-        player.seekTo(meta.resumeAt);
-      }
-      meta._resumed = true;
-    }
   });
 
   player.onFps = (fps) => {
     $('#p-fps').textContent = fps === null || fps === undefined ? '-' : `${fps} FPS`;
   };
+}
+
+/// Lists what the current stream can genuinely play at — see
+// PlayerController.getQualityOptions for how that set is decided — plus the
+// film's own audio languages and subtitles, when it has more than one / any.
+function toggleQualityMenu() {
+  const existing = document.getElementById('quality-menu');
+  if (existing) { existing.remove(); return; }
+
+  const quality = player ? player.getQualityOptions() : [];
+  const audio = player ? player.getAudioOptions() : [];
+  const subs = player ? player.getSubtitleOptions() : [];
+  const section = (title, kind, options) => `<div class="qm-head">${title}</div>` + options.map((o) => `
+      <button class="qm-item${o.active ? ' active' : ''}" data-kind="${kind}" data-id="${escapeHtml(String(o.id))}" data-lang="${escapeHtml(o.lang || '')}">
+        <span>${escapeHtml(o.label)}</span>${o.active ? '<span class="qm-check">✓</span>' : ''}
+      </button>`).join('');
+
+  const menu = document.createElement('div');
+  menu.id = 'quality-menu';
+  menu.className = 'quality-menu';
+  menu.innerHTML = (quality.length ? section('Quality', 'quality', quality) : '<div class="qm-head">Quality</div><div class="qm-empty">Available once the video has started.</div>')
+    + (audio.length ? '<div class="qm-sep"></div>' + section('Audio', 'audio', audio) : '')
+    + (subs.length ? '<div class="qm-sep"></div>' + section('Subtitles', 'sub', subs) : '');
+  $('#player-wrap').appendChild(menu);
+
+  menu.querySelectorAll('.qm-item').forEach((btn) => btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    menu.remove();
+    if (btn.classList.contains('active') || !player) return;
+    const { kind, id, lang } = btn.dataset;
+    if (kind === 'quality') {
+      player.selectQuality(id);
+    } else if (kind === 'audio') {
+      player.selectAudio(Number(id));
+      // Remembered, so the next film opens in the same language if it has it.
+      player.preferredAudioLang = lang || '';
+      setSetting('audioLang', lang || '');
+    } else if (kind === 'sub') {
+      const index = Number(id);
+      player.selectSubtitle(index);
+      player.preferredSubtitleLang = index >= 0 ? (lang || '') : '';
+      setSetting('subtitleLang', index >= 0 ? (lang || '') : '');
+    }
+  }));
+}
+
+
+// Skips and shows the amount on screen. Repeated presses add up while the
+// hint is still visible, so holding the key reads as one "+30" rather than
+// three separate flashes.
+let seekHintTimer = null;
+let seekHintTotal = 0;
+let seekHintDir = 0;
+function skipBy(seconds) {
+  if (!player) return;
+  player.seekRelative(seconds);
+
+  const dir = seconds > 0 ? 1 : -1;
+  if (dir !== seekHintDir) seekHintTotal = 0;
+  seekHintDir = dir;
+  seekHintTotal += Math.abs(seconds);
+
+  const el = $(dir > 0 ? '#seek-hint-right' : '#seek-hint-left');
+  const other = $(dir > 0 ? '#seek-hint-left' : '#seek-hint-right');
+  other.classList.remove('show');
+  el.querySelector('.seek-hint-text').textContent = `${dir > 0 ? '+' : '−'}${seekHintTotal} sec`;
+  el.classList.add('show');
+
+  clearTimeout(seekHintTimer);
+  seekHintTimer = setTimeout(() => {
+    el.classList.remove('show');
+    seekHintTotal = 0;
+    seekHintDir = 0;
+  }, 800);
 }
 
 function fmtTime(sec) {
@@ -1274,7 +2485,7 @@ function splashSetProgress(pct, status) {
   const sub = document.getElementById('splash-subtitle');
   if (bar) bar.style.width = `${Math.min(100, pct)}%`;
   if (left) left.textContent = status || '';
-  if (sub) sub.textContent = status || 'Starting IPTV Player';
+  if (sub) sub.textContent = status || 'Starting MY IPTV';
 }
 function splashSetRight(text) {
   const el = document.getElementById('splash-status-right');
@@ -1290,16 +2501,60 @@ async function preloadPosters(items, onProgress) {
     await Promise.allSettled(batch.map((item) => new Promise((resolve) => {
       const img = new Image();
       img.onload = img.onerror = resolve;
-      img.src = item.cover || item.stream_icon || '';
+      // Same URL the grid will ask for, so this warms the thumbnail cache
+      // rather than pulling the full-size original a second time.
+      const art = usableArtwork(item.stream_icon || item.cover || item.logo || '');
+      if (!art) { resolve(); return; }
+      img.src = thumbUrl(art);
     })));
     done += batch.length;
     if (onProgress) onProgress(done, total);
   }
 }
 
+// Re-fetches the full catalog after the app has already opened from a fresh
+// disk cache, so the cache doesn't go stale while the user is browsing and
+// the *next* launch also gets to skip the splash's slow path. Runs quietly —
+// no splash, no spinner; only touches itemCache once new data is in hand.
+async function refreshCatalogInBackground(client, account) {
+  try {
+    const [liveCats, movieCats, seriesCats] = await Promise.all([
+      client.getLiveCategories().catch(() => null),
+      client.getVodCategories().catch(() => null),
+      client.getSeriesCategories().catch(() => null)
+    ]);
+    const [liveItems, movieItems, seriesItems] = await Promise.all([
+      client.getLiveStreams(null).catch(() => null),
+      client.getVodStreams(null).catch(() => null),
+      client.getSeries(null).catch(() => null)
+    ]);
+    if (![liveCats, movieCats, seriesCats, liveItems, movieItems, seriesItems].every((l) => Array.isArray(l) && l.length)) return;
+
+    if (state.activeAccount === account) {
+      state.liveCats = liveCats;
+      state.movieCats = movieCats;
+      state.seriesCats = seriesCats;
+      state.itemCache['live:all'] = liveItems;
+      state.itemCache['movies:all'] = movieItems;
+      state.itemCache['series:all'] = seriesItems;
+    }
+
+    await window.api.setCatalog({
+      accountId: account.id,
+      savedAt: Date.now(),
+      liveCats, movieCats, seriesCats,
+      liveItems, movieItems, seriesItems
+    }).catch(() => {});
+  } catch { /* stale cache just expires on its own next launch */ }
+}
+
 // ===================== Boot =====================
 async function boot() {
   await loadStore();
+  // Needed before the first grid renders so posters can go through the
+  // downscaling proxy rather than pulling full-size artwork.
+  try { state.thumbBases = await window.api.getThumbBases(); } catch { state.thumbBases = []; }
+  state.thumbBase = (state.thumbBases && state.thumbBases[0]) || null;
   initLoginTabs();
   initLoginForm();
   initSearchBoxes();
@@ -1308,6 +2563,9 @@ async function boot() {
   initLogout();
   initSettings();
   initQuickLists();
+  initDownloads();
+  initPlaylistSwitcher();
+  applySettings();
   updateHistoryBadges();
   updateFavCount();
   renderSavedAccounts();
@@ -1320,37 +2578,103 @@ async function boot() {
     try {
       if (active.type === 'xtream') {
         const client = new XtreamClient(active.url, active.username, active.password);
-        splashSetProgress(20, 'Authenticating...');
+        splashSetProgress(10, 'Authenticating...');
         const auth = await client.authenticate();
         state.client = client;
         state.activeAccount = active;
         state.store.activeAccountId = active.id;
         await saveStore();
 
-        splashSetProgress(35, 'Loading categories...');
+        // If we fetched this same account's full catalog recently, skip
+        // straight to the app instead of re-downloading everything — the
+        // splash screen used to always run the full categories+items+images
+        // sequence even when nothing could have changed in the last few
+        // minutes, which is what made relaunching the app feel just as slow
+        // as the very first run.
+        const cache = await window.api.getCatalog().catch(() => null);
+        const cacheIsFresh = cache && cache.accountId === active.id
+          && (Date.now() - cache.savedAt) < DATA_CACHE_TTL_MS;
+
+        if (cacheIsFresh) {
+          splashSetProgress(70, 'Loading from cache...');
+          // Anything missing from the snapshot is simply fetched when its tab
+          // is opened.
+          const nonEmpty = (list) => (Array.isArray(list) && list.length ? list : null);
+          state.liveCats = nonEmpty(cache.liveCats);
+          state.movieCats = nonEmpty(cache.movieCats);
+          state.seriesCats = nonEmpty(cache.seriesCats);
+          if (nonEmpty(cache.liveItems)) state.itemCache['live:all'] = cache.liveItems;
+          if (nonEmpty(cache.movieItems)) state.itemCache['movies:all'] = cache.movieItems;
+          if (nonEmpty(cache.seriesItems)) state.itemCache['series:all'] = cache.seriesItems;
+          splashSetProgress(100, 'Ready!');
+          enterApp(auth);
+          // Refresh the catalog in the background so the next launch (and
+          // this session, once it lands) has current data — the user is
+          // already in the app by the time this resolves.
+          refreshCatalogInBackground(client, active);
+          return;
+        }
+
+        // Each step below reports the fraction of *actual* work done so
+        // far (categories fetched, items fetched per section, images
+        // decoded) rather than a fixed guess — so the bar reflects what's
+        // really happening instead of just animating on a timer.
+        const totalSteps = 6; // categories, live items, movie items, series items, images, done
+        let stepsDone = 0;
+        const stepProgress = (label) => {
+          stepsDone++;
+          splashSetProgress(10 + Math.round((stepsDone / totalSteps) * 90), label);
+        };
+
         const mySeq = ++state.loadSeq;
+        // A request that fails is retried once, and if it still fails it is
+        // left out (null) rather than stored as an empty list — an empty list
+        // would be served as "0 items" for as long as the cache lasts.
+        const fetchList = (fn) => fn().then((d) => (Array.isArray(d) ? d : null)).catch(() => null)
+          .then((d) => d || new Promise((r) => setTimeout(r, 800)).then(() => fn()).then((x) => (Array.isArray(x) ? x : null)).catch(() => null));
         const [liveCats, movieCats, seriesCats] = await Promise.all([
-          client.getLiveCategories().catch(() => []),
-          client.getVodCategories().catch(() => []),
-          client.getSeriesCategories().catch(() => [])
+          fetchList(() => client.getLiveCategories()),
+          fetchList(() => client.getVodCategories()),
+          fetchList(() => client.getSeriesCategories())
         ]);
         state.liveCats = liveCats;
         state.movieCats = movieCats;
         state.seriesCats = seriesCats;
+        stepProgress('Loading categories...');
 
-        splashSetProgress(55, 'Loading channels...');
-        const liveItems = await client.getLiveStreams(null).catch(() => []);
-        splashSetProgress(70, 'Loading movies...');
-        const movieItems = await client.getVodStreams(null).catch(() => []);
+        const liveItems = await fetchList(() => client.getLiveStreams(null));
+        stepProgress('Loading channels...');
+        const movieItems = await fetchList(() => client.getVodStreams(null));
+        stepProgress('Loading movies...');
+        const seriesItems = await fetchList(() => client.getSeries(null));
+        stepProgress('Loading series...');
 
-        splashSetProgress(85, 'Preloading images...');
-        await preloadPosters([...liveItems.slice(0, 60), ...movieItems.slice(0, 60)], (done, total) => {
-          const pct = 85 + Math.round((done / total) * 15);
+        // Seed the item cache with everything just fetched so switching
+        // between Live/Movies/Series tabs right after boot is instant —
+        // otherwise switchSection() would immediately re-fetch the exact
+        // same "all" list over the network and flash a loading spinner.
+        if (liveItems && liveItems.length) state.itemCache['live:all'] = liveItems;
+        if (movieItems && movieItems.length) state.itemCache['movies:all'] = movieItems;
+        if (seriesItems && seriesItems.length) state.itemCache['series:all'] = seriesItems;
+
+        const toPreload = [...(liveItems || []).slice(0, 60), ...(movieItems || []).slice(0, 60), ...(seriesItems || []).slice(0, 60)];
+        await preloadPosters(toPreload, (done, total) => {
+          const pct = 10 + Math.round(((stepsDone + done / total) / totalSteps) * 90);
           splashSetProgress(pct, `Loading images (${done}/${total})`);
         });
+        stepProgress('Ready!');
 
-        splashSetProgress(100, 'Ready!');
-        await new Promise((r) => setTimeout(r, 300));
+        // Only a complete snapshot is worth starting from next time.
+        const complete = [liveCats, movieCats, seriesCats, liveItems, movieItems, seriesItems]
+          .every((list) => Array.isArray(list) && list.length);
+        if (complete) {
+          await window.api.setCatalog({
+            accountId: active.id,
+            savedAt: Date.now(),
+            liveCats, movieCats, seriesCats,
+            liveItems, movieItems, seriesItems
+          }).catch(() => {});
+        }
 
         enterApp(auth);
       } else if (active.type === 'm3u') {

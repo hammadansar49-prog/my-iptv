@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>IPTV Player</title>
+<title>MY IPTV</title>
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -11,8 +11,8 @@
 <div id="view-splash" class="view active">
   <div class="splash-card">
     <div class="splash-logo">Z</div>
-    <div class="splash-title">IPTV Player</div>
-    <div class="splash-subtitle" id="splash-subtitle">Starting IPTV Player</div>
+    <div class="splash-title">MY IPTV</div>
+    <div class="splash-subtitle" id="splash-subtitle">Starting MY IPTV</div>
     <div class="splash-progress-wrap">
       <div class="splash-progress-bar" id="splash-progress-bar"></div>
     </div>
@@ -28,7 +28,7 @@
   <div class="login-card">
     <div class="brand">
       <div class="brand-mark">Z</div>
-      <div class="brand-name">IPTV Player</div>
+      <div class="brand-name">MY IPTV</div>
     </div>
 
     <div class="login-tabs">
@@ -75,10 +75,24 @@
       <button class="tb-tab" data-section="series"><span class="ic">📀</span> Series</button>
     </nav>
     <div class="tb-right">
-      <div class="account-pill" id="account-pill">
-        <span id="account-name">Account</span>
-        <small id="account-sub">-</small>
+      <div class="playlist-switch" id="playlist-switch">
+        <button class="playlist-pill" id="playlist-pill">
+          <span class="pl-icon">☰</span>
+          <span class="pl-labels">
+            <span id="account-name">Account</span>
+            <small id="account-sub">-</small>
+          </span>
+          <span class="pl-caret">⌄</span>
+        </button>
+        <div class="playlist-menu" id="playlist-menu" hidden>
+          <div class="pl-menu-head" id="pl-menu-head">YOUR PLAYLISTS</div>
+          <div id="pl-menu-list"></div>
+          <button class="pl-menu-add" id="pl-menu-add">＋ Add New Playlist</button>
+        </div>
       </div>
+      <button class="icon-btn tb-downloads-btn" id="tb-downloads" title="Downloads">
+        ⬇<span class="tb-downloads-dot" id="tb-downloads-dot" hidden></span>
+      </button>
       <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
       <button class="icon-btn" id="btn-logout" title="Switch account">🚪</button>
     </div>
@@ -90,6 +104,7 @@
         <div class="sb-quick" id="sb-continue">⏱ Continue Watching <span id="cw-count">0</span></div>
         <div class="sb-quick" id="sb-recent">🕘 Recently Watched <span id="recent-count">0</span></div>
         <div class="sb-quick" id="sb-favorites">⭐ Favorites <span id="fav-count">0</span></div>
+        <div class="sb-quick" id="sb-downloads">⬇ Downloads <span id="dl-count">0</span></div>
       </div>
       <div class="sb-heading">
         <span>Categories</span><span id="cat-count">0</span>
@@ -140,12 +155,16 @@
   <div class="player-wrap" id="player-wrap">
     <video id="video" playsinline></video>
 
+    <div class="seek-hint left" id="seek-hint-left"><span class="seek-hint-arrows">‹‹</span><span class="seek-hint-text"></span></div>
+    <div class="seek-hint right" id="seek-hint-right"><span class="seek-hint-arrows">››</span><span class="seek-hint-text"></span></div>
+
     <div class="player-overlay" id="player-overlay">
       <div class="p-top">
         <button class="p-back" id="p-back">‹ Back</button>
         <div class="p-top-right">
           <span class="p-badge" id="p-quality">HD</span>
           <span class="p-badge" id="p-fps">-</span>
+          <button class="icon-btn p-download" id="p-download" title="Download to watch offline" hidden>⬇</button>
           <button class="icon-btn" id="p-fav" title="Favorite">♡</button>
           <button class="icon-btn" id="p-settings" title="Quality/Settings">⚙️</button>
           <button class="icon-btn" id="p-pip" title="Picture in Picture">🗗</button>
@@ -196,6 +215,7 @@
 <script src="../node_modules/hls.js/dist/hls.min.js"></script>
 <script src="../node_modules/mpegts.js/dist/mpegts.js"></script>
 <script src="xtream.js"></script>
+<script src="mse.js"></script>
 <script src="player.js"></script>
 <script src="renderer.js"></script>
 </body>

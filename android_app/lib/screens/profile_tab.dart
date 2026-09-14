@@ -4,6 +4,8 @@ import '../models.dart';
 import '../theme.dart';
 import 'login_screen.dart';
 import 'advanced_settings_sheet.dart';
+import 'security_sheet.dart';
+import 'downloads_settings_sheet.dart';
 
 class ProfileTab extends StatefulWidget {
   final AppState state;
@@ -27,8 +29,6 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   Future<void> _loadCounts() async {
-    // Reuse whatever Home/EPG have already fetched — only hit the network
-    // for a section the user hasn't opened yet.
     final cache = widget.state.itemCache;
     setState(() {
       movies = cache['movies:all']?.length;
@@ -38,17 +38,13 @@ class _ProfileTabState extends State<ProfileTab> {
     if (movies != null && series != null && live != null) return;
 
     setState(() => countsLoading = true);
-    final client = widget.state.client!;
     try {
       final results = await Future.wait<List<PlayableItem>>([
-        cache.containsKey('movies:all') ? Future.value(cache['movies:all']!) : client.getVodStreams(null),
-        cache.containsKey('series:all') ? Future.value(cache['series:all']!) : client.getSeries(null),
-        cache.containsKey('live:all') ? Future.value(cache['live:all']!) : client.getLiveStreams(null),
+        widget.state.sectionItems('movies'),
+        widget.state.sectionItems('series'),
+        widget.state.sectionItems('live'),
       ]);
       if (!mounted) return;
-      cache['movies:all'] = results[0];
-      cache['series:all'] = results[1];
-      cache['live:all'] = results[2];
       setState(() {
         movies = results[0].length;
         series = results[1].length;
@@ -70,40 +66,15 @@ class _ProfileTabState extends State<ProfileTab> {
     );
   }
 
-  void _refreshContent() {
-    widget.state.itemCache.clear();
-    widget.state.catCache.clear();
+  Future<void> _refreshContent() async {
+    await widget.state.refreshCatalog();
+    setState(() {
+      movies = series = live = null;
+    });
     _loadCounts();
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Content will refresh next time you open Home / EPG.'), backgroundColor: AppColors.bg3),
-    );
-  }
-
-  void _pickQuality() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.bg2,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Stream Format / Quality', style: TextStyle(fontWeight: FontWeight.w600)),
-            ),
-            ...{'auto': 'Auto (recommended)', '480': '480p', '720': '720p (HD)', '1080': '1080p (Full HD)', '2160': '4K (2160p)'}
-                .entries
-                .map((e) => ListTile(
-                      title: Text(e.value),
-                      trailing: widget.state.quality == e.key ? const Icon(Icons.check, color: AppColors.accent) : null,
-                      onTap: () {
-                        widget.state.setQuality(e.key);
-                        Navigator.pop(context);
-                      },
-                    )),
-          ],
-        ),
-      ),
     );
   }
 
@@ -116,9 +87,21 @@ class _ProfileTabState extends State<ProfileTab> {
     );
   }
 
-  void _comingSoon(String feature) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$feature is coming in a future update.'), backgroundColor: AppColors.bg3),
+  void _openDownloadsSettings() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DownloadsSettingsSheet(state: widget.state),
+    );
+  }
+
+  void _openSecurity() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => SecuritySheet(state: widget.state),
     );
   }
 
@@ -139,7 +122,7 @@ class _ProfileTabState extends State<ProfileTab> {
         children: [
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: AppColors.bg2, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
+            decoration: cardDecoration(radius: 14),
             child: Row(
               children: [
                 Container(
@@ -161,11 +144,11 @@ class _ProfileTabState extends State<ProfileTab> {
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(color: const Color(0xFF22C55E).withOpacity(.15), borderRadius: BorderRadius.circular(20)),
+                  decoration: BoxDecoration(color: AppColors.success.withOpacity(.15), borderRadius: BorderRadius.circular(20)),
                   child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.circle, size: 8, color: Color(0xFF22C55E)),
+                    Icon(Icons.circle, size: 8, color: AppColors.success),
                     SizedBox(width: 5),
-                    Text('Active', style: TextStyle(color: Color(0xFF22C55E), fontSize: 11, fontWeight: FontWeight.w600)),
+                    Text('Active', style: TextStyle(color: AppColors.success, fontSize: 11, fontWeight: FontWeight.w600)),
                   ]),
                 ),
               ],
@@ -178,7 +161,7 @@ class _ProfileTabState extends State<ProfileTab> {
               const SizedBox(width: 10),
               Expanded(child: _statCard(series, 'Series', const Color(0xFF3B82F6))),
               const SizedBox(width: 10),
-              Expanded(child: _statCard(live, 'Live TV', const Color(0xFF22C55E))),
+              Expanded(child: _statCard(live, 'Live TV', AppColors.success)),
             ],
           ),
           const SizedBox(height: 24),
@@ -200,21 +183,21 @@ class _ProfileTabState extends State<ProfileTab> {
           ),
           const SizedBox(height: 24),
           const Text('Settings', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-          const Text('Customize how the app fetches and plays your content.', style: TextStyle(color: AppColors.textDim, fontSize: 12)),
+          const Text('Customize how the app fetches, plays and downloads your content.', style: TextStyle(color: AppColors.textDim, fontSize: 12)),
           const SizedBox(height: 10),
           Container(
-            decoration: BoxDecoration(color: AppColors.bg2, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
+            decoration: cardDecoration(radius: 14),
             child: Column(
               children: [
-                _settingsRow(Icons.refresh, const Color(0xFF22C1C3), 'Refresh Content', 'Pull the latest movies, series and channels.', _refreshContent),
+                _settingsRow(Icons.refresh, AppColors.tileCyan, 'Refresh Content', 'Pull the latest movies, series and channels.', _refreshContent),
                 const Divider(height: 1, color: AppColors.border, indent: 68),
-                _settingsRow(Icons.smart_display_outlined, const Color(0xFFF59E0B), 'Stream Format', 'Pick the quality that plays best.', _pickQuality),
+                _settingsRow(Icons.download_outlined, AppColors.tileOrange, 'Downloads', 'Where downloads are saved, and while-watching behaviour.', _openDownloadsSettings),
                 const Divider(height: 1, color: AppColors.border, indent: 68),
-                _settingsRow(Icons.tune, const Color(0xFF6366F1), 'Advanced Settings', 'Default player, Home layout and refresh.', _openAdvancedSettings),
+                _settingsRow(Icons.tune, AppColors.tileIndigo, 'Advanced Settings', 'Home layout, resume, auto-next and live format.', _openAdvancedSettings),
                 const Divider(height: 1, color: AppColors.border, indent: 68),
-                _settingsRow(Icons.shield_outlined, const Color(0xFF22C55E), 'Security', 'Lock the app behind a passcode.', () => _comingSoon('App lock')),
+                _settingsRow(Icons.shield_outlined, AppColors.tileGreen, 'Security', 'Lock the app behind a passcode.', _openSecurity),
                 const Divider(height: 1, color: AppColors.border, indent: 68),
-                _settingsRow(Icons.logout, const Color(0xFFEF4444), 'Logout', 'Sign out of this account on your device.', _logout, danger: true),
+                _settingsRow(Icons.logout, AppColors.tileRed, 'Logout', 'Sign out of this playlist on your device.', _logout, danger: true),
               ],
             ),
           ),
@@ -248,7 +231,7 @@ class _ProfileTabState extends State<ProfileTab> {
   Widget _infoCard(IconData icon, String label, String value) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(color: AppColors.bg2, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
+      decoration: cardDecoration(radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -272,7 +255,7 @@ class _ProfileTabState extends State<ProfileTab> {
         decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(10)),
         child: Icon(icon, color: Colors.white, size: 20),
       ),
-      title: Text(title, style: TextStyle(color: danger ? const Color(0xFFEF4444) : AppColors.text, fontWeight: FontWeight.w600, fontSize: 14)),
+      title: Text(title, style: TextStyle(color: danger ? AppColors.danger : AppColors.text, fontWeight: FontWeight.w600, fontSize: 14)),
       subtitle: Text(subtitle, style: const TextStyle(color: AppColors.textDim, fontSize: 11)),
       trailing: danger ? null : const Icon(Icons.chevron_right, color: AppColors.textDim),
       onTap: onTap,

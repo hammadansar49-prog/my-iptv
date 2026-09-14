@@ -3,3 +3,4 @@ release/
 *.log
 run-pid.txt
 package-lock.json
+vendor/

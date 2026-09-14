@@ -1,4 +1,7 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart' hide Category;
+import 'package:path_provider/path_provider.dart';
+import 'downloads.dart';
 import 'models.dart';
 import 'storage.dart';
 import 'xtream_client.dart';
@@ -7,43 +10,73 @@ class AppState extends ChangeNotifier {
   Account? activeAccount;
   XtreamClient? client;
   Map<String, dynamic>? authInfo;
+  Directory? _cacheDir;
+
+  final DownloadManager downloads = DownloadManager();
 
   List<HistoryEntry> history = [];
   List<FavoriteEntry> favorites = [];
-  String quality = 'auto';
-  String defaultSection = 'movies'; // all | movies | series | live
-  String defaultPlayer = 'internal'; // internal | vlc
+
+  // ---- Settings ----
+  String quality = 'auto';          // highest stream variant to pick: auto | 480 | 720 | 1080 | 2160
+  String liveFormat = 'm3u8';       // m3u8 | ts
+  String defaultSection = 'movies'; // movies | series | live
   String refreshInterval = '1day';  // never | 6h | 1day | 1week
+  bool resume = true;               // reopen films where they were left
+  bool autoNext = true;             // roll into the next episode
+  int seekStep = 10;                // seconds for double-tap / skip buttons
+  String audioLang = '';            // last audio language picked in the player
+  String subtitleLang = '';         // last subtitle language picked ('' = off)
+  String passcode = '';             // app lock ('' = off)
 
   // Shared across Home/Profile/EPG so nothing gets fetched twice.
   final Map<String, List<Category>> catCache = {};
   final Map<String, List<PlayableItem>> itemCache = {};
 
+  int get maxConnections => int.tryParse('${authInfo?['user_info']?['max_connections'] ?? ''}') ?? 1;
+
   Future<void> init() async {
     await Storage.init();
+    try {
+      _cacheDir = await getApplicationSupportDirectory();
+    } catch (_) {}
     history = Storage.getHistory();
     favorites = Storage.getFavorites();
-    quality = Storage.getQuality();
-    defaultSection = Storage.p.getString('defaultSection') ?? 'movies';
-    defaultPlayer = Storage.p.getString('defaultPlayer') ?? 'internal';
-    refreshInterval = Storage.p.getString('refreshInterval') ?? '1day';
+    quality = Storage.str('quality', 'auto');
+    liveFormat = Storage.str('liveFormat', 'm3u8');
+    defaultSection = Storage.str('defaultSection', 'movies');
+    if (!['movies', 'series', 'live'].contains(defaultSection)) defaultSection = 'movies';
+    refreshInterval = Storage.str('refreshInterval', '1day');
+    resume = Storage.flag('resume', true);
+    autoNext = Storage.flag('autoNext', true);
+    seekStep = int.tryParse(Storage.str('seekStep', '10')) ?? 10;
+    audioLang = Storage.str('audioLang', '');
+    subtitleLang = Storage.str('subtitleLang', '');
+    passcode = Storage.str('passcode', '');
+    await downloads.init();
   }
 
-  Future<void> setDefaultSection(String s) async {
-    defaultSection = s;
-    await Storage.p.setString('defaultSection', s);
+  Future<void> setStr(String key, String value) async {
+    switch (key) {
+      case 'quality': quality = value; break;
+      case 'liveFormat': liveFormat = value; break;
+      case 'defaultSection': defaultSection = value; break;
+      case 'refreshInterval': refreshInterval = value; break;
+      case 'seekStep': seekStep = int.tryParse(value) ?? 10; break;
+      case 'audioLang': audioLang = value; break;
+      case 'subtitleLang': subtitleLang = value; break;
+      case 'passcode': passcode = value; break;
+    }
+    await Storage.setStr(key, value);
     notifyListeners();
   }
 
-  Future<void> setDefaultPlayer(String p) async {
-    defaultPlayer = p;
-    await Storage.p.setString('defaultPlayer', p);
-    notifyListeners();
-  }
-
-  Future<void> setRefreshInterval(String v) async {
-    refreshInterval = v;
-    await Storage.p.setString('refreshInterval', v);
+  Future<void> setFlag(String key, bool value) async {
+    switch (key) {
+      case 'resume': resume = value; break;
+      case 'autoNext': autoNext = value; break;
+    }
+    await Storage.setFlag(key, value);
     notifyListeners();
   }
 
@@ -67,8 +100,12 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> login(Account acc) async {
-    final c = XtreamClient(baseUrl: acc.url, username: acc.username, password: acc.password);
+    final c = XtreamClient(baseUrl: acc.url, username: acc.username, password: acc.password, cacheDir: _cacheDir);
     final auth = await c.authenticate(); // throws XtreamException on failure
+    if (activeAccount?.id != acc.id) {
+      catCache.clear();
+      itemCache.clear();
+    }
     client = c;
     activeAccount = acc;
     authInfo = auth;
@@ -93,15 +130,52 @@ class AppState extends ChangeNotifier {
     client = null;
     activeAccount = null;
     authInfo = null;
+    catCache.clear();
+    itemCache.clear();
     await Storage.setActiveAccountId(null);
     notifyListeners();
   }
 
-  Future<void> setQuality(String q) async {
-    quality = q;
-    await Storage.setQuality(q);
+  /// Drops everything cached for the catalog; the next screen that needs a
+  /// list fetches it fresh.
+  Future<void> refreshCatalog() async {
+    catCache.clear();
+    itemCache.clear();
+    await client?.clearCatalogCache();
     notifyListeners();
   }
+
+  /// The full list for a section, from memory, the disk cache or the network.
+  Future<List<PlayableItem>> sectionItems(String section, {String? categoryId, bool force = false}) async {
+    final key = '$section:${categoryId ?? 'all'}';
+    final cached = itemCache[key];
+    if (cached != null && cached.isNotEmpty && !force) return cached;
+    final c = client!;
+    final list = section == 'live'
+        ? await c.getLiveStreams(categoryId, force: force)
+        : section == 'movies'
+            ? await c.getVodStreams(categoryId, force: force)
+            : await c.getSeries(categoryId, force: force);
+    // An empty list is not remembered: that's what a failed or cut-off
+    // answer looks like, and keeping it showed "0 items" until a restart.
+    if (list.isNotEmpty) itemCache[key] = list;
+    return list;
+  }
+
+  Future<List<Category>> sectionCategories(String section) async {
+    final cached = catCache[section];
+    if (cached != null && cached.isNotEmpty) return cached;
+    final c = client!;
+    final list = section == 'live'
+        ? await c.getLiveCategories()
+        : section == 'movies'
+            ? await c.getVodCategories()
+            : await c.getSeriesCategories();
+    if (list.isNotEmpty) catCache[section] = list;
+    return list;
+  }
+
+  String liveUrl(String streamId) => client!.liveUrl(streamId, ext: liveFormat == 'ts' ? 'ts' : 'm3u8');
 
   // ---- History ----
   HistoryEntry? findHistory(String key) {

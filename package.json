@@ -1,7 +1,8 @@
 {
   "name": "iptv-player",
-  "version": "1.1.0",
-  "description": "Xtream Codes IPTV Player for Windows",
+  "version": "1.2.0",
+  "productName": "MY IPTV",
+  "description": "MY IPTV - Xtream Codes IPTV player for Windows",
   "main": "main.js",
   "author": "veo444555",
   "license": "UNLICENSED",
@@ -19,10 +20,13 @@
     "mpegts.js": "^1.8.2"
   },
   "build": {
-    "appId": "com.veo.iptvplayer",
-    "productName": "IPTV Player",
+    "appId": "com.veo.myiptv",
+    "productName": "MY IPTV",
     "directories": { "output": "release" },
-    "files": ["main.js", "preload.js", "src/**/*", "assets/**/*", "package.json"],
+    "extraResources": [
+      { "from": "vendor/ffmpeg", "to": "ffmpeg", "filter": ["ffmpeg.exe", "ffprobe.exe", "LICENSE.txt"] }
+    ],
+    "files": ["main.js", "preload.js", "downloads.js", "src/**/*", "assets/**/*", "package.json"],
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "assets/icon.ico",
@@ -35,8 +39,8 @@
       "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "IPTV Player",
-      "artifactName": "IPTV-Player-Setup-${version}.exe",
+      "shortcutName": "MY IPTV",
+      "artifactName": "MY-IPTV-Setup-${version}.exe",
       "deleteAppDataOnUninstall": false
     }
   }

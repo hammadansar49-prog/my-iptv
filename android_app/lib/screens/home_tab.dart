@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import '../app_state.dart';
+import '../artwork.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../xtream_client.dart';
 import 'player_screen.dart';
 import 'series_screen.dart';
 import 'lists_screen.dart';
+import 'live_tv_screen.dart';
 
 const kPillSections = ['movies', 'series', 'live'];
 const kPillLabels = {'movies': 'Movies', 'series': 'Series', 'live': 'Live TV'};
@@ -85,18 +87,11 @@ class _HomeTabState extends State<HomeTab> {
       });
     }
 
-    final client = widget.state.client!;
     final mySection = section;
 
     if (!widget.state.catCache.containsKey(section)) {
-      final catsFuture = mySection == 'live'
-          ? client.getLiveCategories()
-          : mySection == 'movies'
-              ? client.getVodCategories()
-              : client.getSeriesCategories();
-      catsFuture.then((cats) {
+      widget.state.sectionCategories(mySection).then((cats) {
         if (!mounted || mySection != section) return;
-        widget.state.catCache[mySection] = cats;
         setState(() {
           categories = cats;
           catLoading = false;
@@ -111,15 +106,9 @@ class _HomeTabState extends State<HomeTab> {
     }
 
     if (!widget.state.itemCache.containsKey(_cacheKey)) {
-      final itemsFuture = mySection == 'live'
-          ? client.getLiveStreams(null)
-          : mySection == 'movies'
-              ? client.getVodStreams(null)
-              : client.getSeries(null);
       try {
-        final list = await itemsFuture;
+        final list = await widget.state.sectionItems(mySection);
         if (!mounted || mySection != section) return;
-        widget.state.itemCache['$mySection:all'] = list;
         setState(() {
           items = list;
           itemsLoading = false;
@@ -135,9 +124,9 @@ class _HomeTabState extends State<HomeTab> {
     }
   }
 
-  Future<void> _loadCategoryItems(String? catId) async {
+  Future<void> _loadCategoryItems(String? catId, {bool force = false}) async {
     final key = '$section:${catId ?? 'all'}';
-    if (widget.state.itemCache.containsKey(key)) {
+    if (!force && widget.state.itemCache.containsKey(key)) {
       setState(() {
         items = widget.state.itemCache[key]!;
         renderedCount = pageSize.clamp(0, items.length);
@@ -150,16 +139,7 @@ class _HomeTabState extends State<HomeTab> {
       itemsError = null;
     });
     try {
-      final client = widget.state.client!;
-      List<PlayableItem> list;
-      if (section == 'live') {
-        list = await client.getLiveStreams(catId);
-      } else if (section == 'movies') {
-        list = await client.getVodStreams(catId);
-      } else {
-        list = await client.getSeries(catId);
-      }
-      widget.state.itemCache[key] = list;
+      final list = await widget.state.sectionItems(section, categoryId: catId, force: force);
       setState(() {
         items = list;
         itemsLoading = false;
@@ -236,8 +216,10 @@ class _HomeTabState extends State<HomeTab> {
   Future<void> _openItem(PlayableItem it) async {
     final client = widget.state.client!;
     if (section == 'live') {
-      final url = client.liveUrl(it.id, ext: 'm3u8');
-      _goToPlayer(PlayRequest(url: url, isLive: true, type: 'live', title: it.name, subtitle: 'Live TV', thumb: it.thumb, historyKey: 'live:${it.id}'), favSection: 'live', favItem: it);
+      // Live channels open the way YouTube plays a video: inline at the top
+      // with the rest of the channels scrollable underneath, not straight
+      // into a forced-landscape full player.
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => LiveTvScreen(state: widget.state, channels: _filteredItems, initial: it)));
     } else if (section == 'movies') {
       final url = client.vodUrl(it.id, ext: it.containerExt);
       _goToPlayer(PlayRequest(url: url, isLive: false, type: 'movie', title: it.name, subtitle: 'Movie', thumb: it.thumb, historyKey: 'movie:${it.id}'), favSection: 'movies', favItem: it);
@@ -262,7 +244,7 @@ class _HomeTabState extends State<HomeTab> {
           color: AppColors.accent,
           onRefresh: () async {
             widget.state.itemCache.remove(_cacheKey);
-            await _loadSection();
+            await _loadCategoryItems(categoryId, force: true);
           },
           child: CustomScrollView(
             controller: scrollCtrl,
@@ -291,10 +273,10 @@ class _HomeTabState extends State<HomeTab> {
             width: 32, height: 32,
             decoration: BoxDecoration(gradient: const LinearGradient(colors: [AppColors.accent, AppColors.accent2]), borderRadius: BorderRadius.circular(8)),
             alignment: Alignment.center,
-            child: const Text('Z', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text('M', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
           const SizedBox(width: 10),
-          const Expanded(child: Text('IPTV Player', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700))),
+          const Expanded(child: Text('MY IPTV', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700))),
           IconButton(
             icon: const Icon(Icons.favorite, color: AppColors.accent),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListsScreen(state: widget.state, kind: ListsKind.favorites))),
@@ -373,9 +355,7 @@ class _HomeTabState extends State<HomeTab> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      it.thumb.isNotEmpty
-                          ? Image.network(it.thumb, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: AppColors.bg2))
-                          : Container(color: AppColors.bg2),
+                      Artwork(url: it.thumb, title: it.name, width: MediaQuery.of(context).size.width, fit: BoxFit.cover),
                       Container(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
@@ -506,9 +486,7 @@ class _ItemCardState extends State<_ItemCard> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  it.thumb.isNotEmpty
-                      ? Image.network(it.thumb, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _placeholder(it.name))
-                      : _placeholder(it.name),
+                  Artwork(url: it.thumb, title: it.name, width: 150, fit: BoxFit.cover),
                   if (it.rating > 0) Positioned(top: 6, left: 6, child: _badge('★ ${it.rating.toStringAsFixed(1)}')),
                   Positioned(
                     top: 6, right: 6,
@@ -536,11 +514,6 @@ class _ItemCardState extends State<_ItemCard> {
       ),
     );
   }
-
-  Widget _placeholder(String name) => Container(
-        color: AppColors.bg3, alignment: Alignment.center, padding: const EdgeInsets.all(6),
-        child: Text(name, maxLines: 3, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: AppColors.textDim)),
-      );
 
   Widget _badge(String text) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

@@ -6,5 +6,27 @@ contextBridge.exposeInMainWorld('api', {
   getJson: (url) => ipcRenderer.invoke('net:getJson', url),
   getText: (url) => ipcRenderer.invoke('net:getText', url),
   getProxyBase: () => ipcRenderer.invoke('proxy:getBase'),
-  getAppVersion: () => ipcRenderer.invoke('app:getVersion')
+  getThumbBase: () => ipcRenderer.invoke('proxy:getThumbBase'),
+  getThumbBases: () => ipcRenderer.invoke('proxy:getThumbBases'),
+  getCatalog: () => ipcRenderer.invoke('catalog:get'),
+  setCatalog: (data) => ipcRenderer.invoke('catalog:set', data),
+  getCacheInfo: () => ipcRenderer.invoke('cache:info'),
+  clearVideoCache: () => ipcRenderer.invoke('cache:clear'),
+  getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
+  focusWindow: () => ipcRenderer.invoke('window:focus'),
+  downloadsList: () => ipcRenderer.invoke('downloads:list'),
+  downloadsAdd: (meta) => ipcRenderer.invoke('downloads:add', meta),
+  downloadsPause: (id) => ipcRenderer.invoke('downloads:pause', id),
+  downloadsResume: (id) => ipcRenderer.invoke('downloads:resume', id),
+  downloadsRemove: (id, deleteFile) => ipcRenderer.invoke('downloads:remove', id, deleteFile),
+  downloadsGetDir: () => ipcRenderer.invoke('downloads:getDir'),
+  downloadsSetConcurrent: (on) => ipcRenderer.invoke('downloads:setConcurrent', on),
+  downloadsChooseDir: () => ipcRenderer.invoke('downloads:chooseDir'),
+  downloadsOpenFolder: (id) => ipcRenderer.invoke('downloads:openFolder', id),
+  downloadsFileUrl: (id) => ipcRenderer.invoke('downloads:fileUrl', id),
+  onDownloadsUpdate: (cb) => {
+    const handler = (_e, list) => cb(list);
+    ipcRenderer.on('downloads:update', handler);
+    return () => ipcRenderer.removeListener('downloads:update', handler);
+  }
 });

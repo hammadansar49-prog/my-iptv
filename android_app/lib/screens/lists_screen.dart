@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../app_state.dart';
+import '../artwork.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'player_screen.dart';
 import 'series_screen.dart';
+import 'live_tv_screen.dart';
 
 enum ListsKind { continueWatching, recent, favorites }
 
@@ -57,15 +59,7 @@ class _ListsScreenState extends State<ListsScreen> {
           color: AppColors.bg2,
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
-            leading: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: SizedBox(
-                width: 60, height: 60,
-                child: h.thumb.isNotEmpty
-                    ? Image.network(h.thumb, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: AppColors.bg3))
-                    : Container(color: AppColors.bg3),
-              ),
-            ),
+            leading: Artwork(url: h.thumb, title: h.title, width: 60, radius: 6, placeholderIcon: Icons.movie_outlined),
             title: Text(h.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -114,11 +108,7 @@ class _ListsScreenState extends State<ListsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: f.item.thumb.isNotEmpty
-                      ? Image.network(f.item.thumb, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: AppColors.bg3))
-                      : Container(color: AppColors.bg3, alignment: Alignment.center, child: Text(f.item.name, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11))),
-                ),
+                Expanded(child: Artwork(url: f.item.thumb, title: f.item.name, width: 150, fit: BoxFit.cover)),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   child: Text(f.item.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
@@ -136,16 +126,16 @@ class _ListsScreenState extends State<ListsScreen> {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => SeriesScreen(state: widget.state, series: f.item)));
       return;
     }
+    if (f.section == 'live') {
+      final liveFavs = widget.state.favorites.where((x) => x.section == 'live').map((x) => x.item).toList();
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => LiveTvScreen(state: widget.state, channels: liveFavs, initial: f.item)));
+      return;
+    }
     final client = widget.state.client!;
-    final req = f.section == 'live'
-        ? PlayRequest(
-            url: client.liveUrl(f.item.id, ext: 'm3u8'), isLive: true, type: 'live',
-            title: f.item.name, subtitle: 'Live TV', thumb: f.item.thumb, historyKey: 'live:${f.item.id}',
-          )
-        : PlayRequest(
-            url: client.vodUrl(f.item.id, ext: f.item.containerExt), isLive: false, type: 'movie',
-            title: f.item.name, subtitle: 'Movie', thumb: f.item.thumb, historyKey: 'movie:${f.item.id}',
-          );
+    final req = PlayRequest(
+      url: client.vodUrl(f.item.id, ext: f.item.containerExt), isLive: false, type: 'movie',
+      title: f.item.name, subtitle: 'Movie', thumb: f.item.thumb, historyKey: 'movie:${f.item.id}',
+    );
     final existing = widget.state.findHistory(req.historyKey);
     if (existing != null) req.resumeAt = existing.resumeAt;
     Navigator.of(context).push(MaterialPageRoute(
