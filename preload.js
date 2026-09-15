@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('api', {
   checkTrialAvailability: () => ipcRenderer.invoke('trial:checkAvailability'),
   claimTrial: () => ipcRenderer.invoke('trial:claim'),
   getAnnouncement: () => ipcRenderer.invoke('announcement:get'),
+  submitAnnouncementReview: (rating, comment, announcementCreatedAt) =>
+    ipcRenderer.invoke('announcement:submitReview', { rating, comment, announcementCreatedAt }),
   checkForUpdate: () => ipcRenderer.invoke('update:check'),
   onLicenseInvalidated: (cb) => {
     const handler = () => cb();

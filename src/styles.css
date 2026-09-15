@@ -437,6 +437,11 @@ html[data-theme="light"] #view-player { background: #000; }
 .app-modal-card { width: 420px; max-width: 90vw; background: var(--bg-2); border: 1px solid var(--border); border-radius: 14px; padding: 26px; box-shadow: 0 20px 60px rgba(0,0,0,.5); text-align: center; }
 .app-modal-title { font-size: 18px; font-weight: 700; margin-bottom: 14px; }
 .app-modal-body { font-size: 14px; color: var(--text-dim); line-height: 1.5; margin-bottom: 20px; white-space: pre-wrap; }
+.ann-body { font-weight: 700; color: var(--text); }
+.ann-stars { display: flex; justify-content: center; gap: 6px; margin-bottom: 12px; }
+.ann-star { background: none; border: none; font-size: 26px; color: var(--bg-3); cursor: pointer; line-height: 1; padding: 0; transition: color .1s; }
+.ann-star.filled { color: #f0c852; }
+.ann-comment { width: 100%; margin-bottom: 14px; resize: vertical; min-height: 44px; }
 .app-modal-card .btn-primary { width: 100%; }
 .app-modal-card.pro-modal-card { width: min(760px, 92vw); }
 .lang-picker-list { display: flex; flex-direction: column; gap: 8px; }

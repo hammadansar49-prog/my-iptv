@@ -2974,14 +2974,39 @@ function showAnnouncementModal(ann) {
   const overlay = document.createElement('div');
   overlay.id = 'app-announcement';
   overlay.className = 'app-modal-overlay';
+  // Star rating + comment only appear when the admin turned on
+  // "collect_feedback" for this specific announcement — most announcements
+  // (maintenance notices etc.) don't need it and just get the OK button.
+  const feedbackHtml = ann.collect_feedback ? `
+    <div class="ann-stars" id="ann-stars">
+      ${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="ann-star" data-star="${n}">★</button>`).join('')}
+    </div>
+    <textarea id="ann-comment" class="settings-input ann-comment" rows="2" placeholder="Anything you'd like to add? (optional)"></textarea>` : '';
   overlay.innerHTML = `
     <div class="app-modal-card">
       <div class="app-modal-title">Announcement</div>
-      <div class="app-modal-body">${String(ann.text).replace(/</g, '&lt;')}</div>
+      <div class="app-modal-body ann-body">${String(ann.text).replace(/</g, '&lt;')}</div>
+      ${feedbackHtml}
       <button class="btn-primary" id="app-announcement-close">OK</button>
     </div>`;
   document.body.appendChild(overlay);
+
+  let selectedStars = 0;
+  if (ann.collect_feedback) {
+    const starButtons = overlay.querySelectorAll('.ann-star');
+    const paintStars = (n) => starButtons.forEach((b) => b.classList.toggle('filled', Number(b.dataset.star) <= n));
+    starButtons.forEach((btn) => {
+      btn.addEventListener('mouseenter', () => paintStars(Number(btn.dataset.star)));
+      btn.addEventListener('click', () => { selectedStars = Number(btn.dataset.star); paintStars(selectedStars); });
+    });
+    overlay.querySelector('#ann-stars').addEventListener('mouseleave', () => paintStars(selectedStars));
+  }
+
   document.getElementById('app-announcement-close').addEventListener('click', async () => {
+    if (ann.collect_feedback && selectedStars > 0) {
+      const comment = overlay.querySelector('#ann-comment')?.value || '';
+      window.api.submitAnnouncementReview(selectedStars, comment, ann.created_at || null).catch(() => {});
+    }
     overlay.remove();
     state.store.settings = state.store.settings || {};
     state.store.settings.lastSeenAnnouncementAt = ann.created_at || Date.now();

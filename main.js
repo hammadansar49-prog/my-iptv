@@ -498,6 +498,28 @@ ipcMain.handle('announcement:get', async () => {
   }
 });
 
+// Optional 5-star + comment feedback attached to an announcement (only
+// collected when the admin turns on "collect_feedback" for that
+// announcement — see the theottdeals admin panel's Announcement section).
+// Anyone can create one (no admin login needed, same trust level as e.g.
+// theottdeals' own visitorSessions/orders writes) — the RTDB rule only
+// grants read access to an admin, so reviews aren't a public listing.
+ipcMain.handle('announcement:submitReview', async (_e, { rating, comment, announcementCreatedAt }) => {
+  try {
+    const r = Math.max(1, Math.min(5, Math.round(Number(rating) || 0)));
+    const id = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    await rtdbRequest('PUT', `/iptv/announcement_reviews/${id}`, {
+      rating: r,
+      comment: String(comment || '').trim().slice(0, 1000),
+      announcement_created_at: announcementCreatedAt || null,
+      submitted_at: Date.now()
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Network error' };
+  }
+});
+
 // ==============================================================
 // Update check. Admin publishes the latest version + download link (and an
 // optional "force" flag) from the MY IPTV admin panel's Updates section
