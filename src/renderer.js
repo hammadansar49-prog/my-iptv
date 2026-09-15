@@ -2677,6 +2677,7 @@ function initLicenseGate() {
           'expired': 'This key has expired.',
           'revoked': 'This key has been revoked.',
           'wrong-device': 'This key is already active on another device.',
+          'device-limit-reached': 'This key has reached its device limit.',
           'network-error': 'Could not reach the license server. Check your internet connection.'
         };
         licenseSetError(messages[res.reason] || 'Invalid license key.');
@@ -2692,19 +2693,21 @@ function initLicenseGate() {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
 }
 
-// Every 30 minutes while the app is open, re-check the cached license status
-// (cheap, local — main process only phones the server once/day, see main.js
-// revalidateLicenseInBackground). If it has flipped invalid, block the UI
-// again immediately instead of waiting for the next restart.
+// Every 2 minutes while the app is open, ask the server (not just the local
+// cache) whether this key is still valid — a read-only check, doesn't touch
+// device slots (see checkKeyStatusOnly in main.js). This is what makes a
+// revoke from the admin panel actually kick an already-running app back to
+// the license screen within a couple of minutes instead of the next day
+// (main.js's own background revalidation only runs once/day).
 function armLicenseWatch() {
   setInterval(async () => {
     try {
-      const status = await window.api.licenseGetStatus();
+      const status = await window.api.licenseRecheckNow();
       if (!status.valid) {
         showView('license');
       }
     } catch { /* ignore — don't lock the user out over a transient error */ }
-  }, 30 * 60 * 1000);
+  }, 2 * 60 * 1000);
 }
 
 // ===================== Boot =====================

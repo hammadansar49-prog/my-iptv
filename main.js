@@ -294,7 +294,11 @@ ipcMain.handle('shell:openExternal', (_e, url) => {
 // flipped to active — RTDB rules only allow this exact unauthenticated
 // transition (see database.rules.json's iptv/keys/$keyId rule), so a
 // tampered request that changes anything else about the key is rejected
-// server-side, not just skipped client-side.
+// server-side, not just skipped client-side. Supports a key being shared
+// across up to `max_devices` devices (admin sets this when generating the
+// key) — `machine_ids` is a map of every device that's claimed a slot,
+// `device_count` is kept alongside it purely so the RTDB rule can check the
+// limit without needing to count map children itself.
 async function verifyKeyAgainstRtdb(key, machineId) {
   const trimmedKey = String(key || '').trim();
   if (!trimmedKey) return { valid: false, reason: 'not-found' };
@@ -303,16 +307,47 @@ async function verifyKeyAgainstRtdb(key, machineId) {
   if (row.status === 'revoked') return { valid: false, reason: 'revoked' };
 
   const now = Date.now();
+  const maxDevices = row.max_devices || 1;
+  const machineIds = row.machine_ids || {};
 
   if (row.status === 'unused') {
     const expiresAt = now + row.duration_days * 24 * 60 * 60 * 1000;
-    const updated = { ...row, status: 'active', machine_id: machineId, activated_at: now, expires_at: expiresAt };
-    await rtdbRequest('PUT', `/iptv/keys/${encodeURIComponent(trimmedKey)}`, updated);
+    await rtdbRequest('PATCH', `/iptv/keys/${encodeURIComponent(trimmedKey)}`, {
+      status: 'active',
+      activated_at: now,
+      expires_at: expiresAt,
+      device_count: 1,
+      [`machine_ids/${machineId}`]: true
+    });
     return { valid: true, plan: row.plan_label, expiresAt };
   }
 
-  if (row.machine_id !== machineId) return { valid: false, reason: 'wrong-device' };
   if (row.expires_at && row.expires_at < now) return { valid: false, reason: 'expired' };
+
+  if (machineIds[machineId]) {
+    return { valid: true, plan: row.plan_label, expiresAt: row.expires_at };
+  }
+
+  const currentCount = row.device_count || Object.keys(machineIds).length;
+  if (currentCount >= maxDevices) return { valid: false, reason: 'device-limit-reached' };
+
+  await rtdbRequest('PATCH', `/iptv/keys/${encodeURIComponent(trimmedKey)}`, {
+    device_count: currentCount + 1,
+    [`machine_ids/${machineId}`]: true
+  });
+  return { valid: true, plan: row.plan_label, expiresAt: row.expires_at };
+}
+
+// Read-only status check — no activation, no device-slot claim. Used for
+// the frequent "did the admin revoke this?" poll, which must never
+// accidentally consume a device slot on a key it isn't actively verifying.
+async function checkKeyStatusOnly(key) {
+  const trimmedKey = String(key || '').trim();
+  if (!trimmedKey) return { valid: false, reason: 'not-found' };
+  const row = await rtdbRequest('GET', `/iptv/keys/${encodeURIComponent(trimmedKey)}`);
+  if (!row) return { valid: false, reason: 'not-found' };
+  if (row.status === 'revoked') return { valid: false, reason: 'revoked' };
+  if (row.expires_at && row.expires_at < Date.now()) return { valid: false, reason: 'expired' };
   return { valid: true, plan: row.plan_label, expiresAt: row.expires_at };
 }
 
@@ -328,6 +363,26 @@ ipcMain.handle('license:verify', async (_e, key) => {
   } catch (err) {
     return { valid: false, reason: 'network-error', error: err.message || 'Network error' };
   }
+});
+
+// Frequent, lightweight, read-only poll so a revoke/expiry from the admin
+// panel reaches an already-running app within minutes instead of waiting for
+// the once-a-day full revalidation below. Called from the renderer every
+// couple of minutes (see armLicenseWatch in src/renderer.js).
+ipcMain.handle('license:recheckNow', async () => {
+  const lic = readLicense();
+  if (!lic || !lic.key) return localLicenseStatus();
+  try {
+    const result = await checkKeyStatusOnly(lic.key);
+    if (result.valid) {
+      writeLicense({ ...lic, plan: result.plan, expiresAt: result.expiresAt, lastVerifiedAt: Date.now() });
+    } else {
+      writeLicense({ ...lic, expiresAt: 0 });
+    }
+  } catch {
+    // Offline or server unreachable — keep the last known local state.
+  }
+  return localLicenseStatus();
 });
 
 // Background re-check of an already-saved license: catches revocations/

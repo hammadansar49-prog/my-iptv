@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('downloads:update', handler);
   },
   licenseGetStatus: () => ipcRenderer.invoke('license:getStatus'),
+  licenseRecheckNow: () => ipcRenderer.invoke('license:recheckNow'),
   licenseVerify: (key) => ipcRenderer.invoke('license:verify', key),
   licenseGetPlans: () => ipcRenderer.invoke('license:getPlans'),
   licenseGetSettings: () => ipcRenderer.invoke('license:getSettings'),
