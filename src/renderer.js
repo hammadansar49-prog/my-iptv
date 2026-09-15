@@ -2854,10 +2854,17 @@ async function updateProBadge() {
   } catch { /* badge just stays hidden */ }
 }
 
+// *bold* is WhatsApp's own markdown (single asterisks), not the app's
+// "**bold**" specs syntax — this is what actually renders bold once a
+// message lands in the chat. Kept in sync with DEFAULT_WA_TEMPLATE in the
+// theottdeals admin panel's admin-iptv.js — that's the same fallback text.
+const DEFAULT_WA_TEMPLATE = `Hi TheOTTDeals! 👋\n\nI'd like to activate the *MY IPTV {plan}* ({price}, {duration}).\n\nPlease send me the activation details so I can get started.\n\nThank you!`;
+
 // Opens WhatsApp (via the main process — renderer can't launch external
-// apps directly) with a pre-filled, professional message naming the chosen
-// package, so the admin knows exactly what the customer wants without any
-// back-and-forth before payment.
+// apps directly) with a pre-filled message naming the chosen package. The
+// message itself is admin-editable (theottdeals admin panel's WhatsApp
+// Number section, "message_template") with {plan}/{price}/{duration}
+// placeholders — falls back to a sensible default when nothing's been set.
 async function openPackageOnWhatsApp(plan) {
   try {
     const res = await window.api.licenseGetSettings();
@@ -2866,10 +2873,11 @@ async function openPackageOnWhatsApp(plan) {
       toast('WhatsApp number is not set up yet — please try again later.');
       return;
     }
-    // *bold* is WhatsApp's own markdown (single asterisks), not the app's
-    // "**bold**" specs syntax — this is what actually renders bold once it
-    // lands in the chat.
-    const message = `Hi TheOTTDeals! 👋\n\nI'd like to activate the *MY IPTV ${plan.label}* (${formatPrice(plan.price, plan.currency)}, ${plan.duration_days} day(s)).\n\nPlease send me the activation details so I can get started.\n\nThank you!`;
+    const template = (res.settings && res.settings.message_template) || DEFAULT_WA_TEMPLATE;
+    const message = template
+      .replace(/\{plan\}/g, plan.label)
+      .replace(/\{price\}/g, formatPrice(plan.price, plan.currency))
+      .replace(/\{duration\}/g, `${plan.duration_days} day(s)`);
     const url = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
     await window.api.openExternal(url);
   } catch {
