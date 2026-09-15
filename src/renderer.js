@@ -1133,7 +1133,7 @@ async function renderUpdatesSettings(pane) {
       if (info && info.available) {
         status.textContent = t('updates.available');
         $('#updates-new-version').textContent = `v${info.latestVersion}`;
-        $('#updates-notes').textContent = info.notes || '';
+        $('#updates-notes').innerHTML = renderSpecsMarkdown(info.notes);
         downloadRow.hidden = false;
         // Both rows get the "an update is waiting" highlight — the top one
         // ("Current version") is what actually caught the user's eye first
@@ -3208,7 +3208,8 @@ function showForceUpdateScreen(info) {
   overlay.innerHTML = `
     <div class="app-modal-card">
       <div class="app-modal-title">Update Required</div>
-      <div class="app-modal-body">A new version (${info.latestVersion}) is required to keep using MY IPTV.${info.notes ? `<br><br>${String(info.notes).replace(/</g, '&lt;')}` : ''}</div>
+      <div class="app-modal-body">A new version (${info.latestVersion}) is required to keep using MY IPTV.</div>
+      ${info.notes ? renderSpecsMarkdown(info.notes) : ''}
       <button class="btn-primary" id="app-force-update-download">Download Update</button>
     </div>`;
   document.body.appendChild(overlay);
