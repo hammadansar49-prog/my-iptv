@@ -1145,6 +1145,13 @@ async function renderUpdatesSettings(pane) {
         };
       } else {
         status.textContent = t('updates.upToDate');
+        // Reset back from a previous "update available" state (e.g. the
+        // admin removed the published update, or this device already
+        // updated) -- otherwise the Download row/highlight from an earlier
+        // check just stayed stuck on screen.
+        downloadRow.hidden = true;
+        pane.querySelector('.settings-row').classList.remove('settings-row-update-available');
+        downloadRow.classList.remove('settings-row-update-available');
       }
     } catch {
       clearInterval(dotsTimer);
