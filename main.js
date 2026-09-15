@@ -195,10 +195,14 @@ ipcMain.handle('net:getText', async (_e, url) => {
 });
 
 // ==============================================================
-// License key gate. Update LICENSE_SERVER_URL to the deployed
-// license-server (see license-server/README.md) before shipping a build.
+// License key gate. Talks directly to the same Firebase Realtime Database
+// the theottdeals.com admin panel already uses (see admin-iptv.js in the
+// theottdeals repo) — no separate license server to host. Public config
+// values only (safe to ship, same ones theottdeals' own firebase-config.js
+// exposes to the browser); access control is enforced by the RTDB rules in
+// theottdeals' database.rules.json, not by keeping these secret.
 // ==============================================================
-const LICENSE_SERVER_URL = process.env.MYIPTV_LICENSE_SERVER_URL || 'https://theottdeals.com/license';
+const IPTV_RTDB_URL = process.env.MYIPTV_RTDB_URL || 'https://theottdeals-reviews-default-rtdb.firebaseio.com';
 
 function getMachineId() {
   const raw = [os.hostname(), os.platform(), os.arch(), (os.cpus()[0] || {}).model || '', os.userInfo().username]
@@ -206,22 +210,26 @@ function getMachineId() {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
-function postJson(url, body, timeoutMs = 15000) {
+function rtdbRequest(method, path, body, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
-    const u = new URL(url);
+    const u = new URL(`${IPTV_RTDB_URL}${path}.json`);
     const lib = u.protocol === 'https:' ? https : http;
-    const payload = JSON.stringify(body);
+    const payload = body !== undefined ? JSON.stringify(body) : undefined;
     const req = lib.request(u, {
-      method: 'POST',
+      method,
       timeout: timeoutMs,
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+      headers: payload !== undefined
+        ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+        : {}
     }, (res) => {
       let chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
         try {
           const text = Buffer.concat(chunks).toString('utf-8');
-          resolve({ status: res.statusCode, data: text ? JSON.parse(text) : {} });
+          const data = text ? JSON.parse(text) : null;
+          if (data && data.error) { reject(new Error(data.error)); return; }
+          resolve(data);
         } catch (e) {
           reject(new Error('Server sent an invalid response'));
         }
@@ -229,7 +237,7 @@ function postJson(url, body, timeoutMs = 15000) {
     });
     req.on('timeout', () => req.destroy(new Error('Connection timed out — server is not responding')));
     req.on('error', (err) => reject(new Error(err.message || 'Network error')));
-    req.write(payload);
+    if (payload !== undefined) req.write(payload);
     req.end();
   });
 }
@@ -255,9 +263,9 @@ ipcMain.handle('license:getStatus', () => localLicenseStatus());
 
 ipcMain.handle('license:getPlans', async () => {
   try {
-    const text = await fetchText(`${LICENSE_SERVER_URL}/plans`);
-    const data = JSON.parse(text);
-    return { ok: true, plans: data.plans || [] };
+    const data = await rtdbRequest('GET', '/iptv/plans');
+    const plans = Object.values(data || {}).filter((p) => p && p.enabled);
+    return { ok: true, plans };
   } catch (err) {
     return { ok: false, error: err.message || 'Network error', plans: [] };
   }
@@ -265,9 +273,8 @@ ipcMain.handle('license:getPlans', async () => {
 
 ipcMain.handle('license:getSettings', async () => {
   try {
-    const text = await fetchText(`${LICENSE_SERVER_URL}/settings`);
-    const data = JSON.parse(text);
-    return { ok: true, settings: data.settings || {} };
+    const data = await rtdbRequest('GET', '/iptv/settings');
+    return { ok: true, settings: data || {} };
   } catch (err) {
     return { ok: false, error: err.message || 'Network error', settings: {} };
   }
@@ -283,15 +290,41 @@ ipcMain.handle('shell:openExternal', (_e, url) => {
   return false;
 });
 
+// Reads the key doc, then (if unused) writes back the SAME doc with status
+// flipped to active — RTDB rules only allow this exact unauthenticated
+// transition (see database.rules.json's iptv/keys/$keyId rule), so a
+// tampered request that changes anything else about the key is rejected
+// server-side, not just skipped client-side.
+async function verifyKeyAgainstRtdb(key, machineId) {
+  const trimmedKey = String(key || '').trim();
+  if (!trimmedKey) return { valid: false, reason: 'not-found' };
+  const row = await rtdbRequest('GET', `/iptv/keys/${encodeURIComponent(trimmedKey)}`);
+  if (!row) return { valid: false, reason: 'not-found' };
+  if (row.status === 'revoked') return { valid: false, reason: 'revoked' };
+
+  const now = Date.now();
+
+  if (row.status === 'unused') {
+    const expiresAt = now + row.duration_days * 24 * 60 * 60 * 1000;
+    const updated = { ...row, status: 'active', machine_id: machineId, activated_at: now, expires_at: expiresAt };
+    await rtdbRequest('PUT', `/iptv/keys/${encodeURIComponent(trimmedKey)}`, updated);
+    return { valid: true, plan: row.plan_label, expiresAt };
+  }
+
+  if (row.machine_id !== machineId) return { valid: false, reason: 'wrong-device' };
+  if (row.expires_at && row.expires_at < now) return { valid: false, reason: 'expired' };
+  return { valid: true, plan: row.plan_label, expiresAt: row.expires_at };
+}
+
 ipcMain.handle('license:verify', async (_e, key) => {
   try {
     const machineId = getMachineId();
-    const { data } = await postJson(`${LICENSE_SERVER_URL}/verify`, { key: String(key || '').trim(), machineId });
-    if (data.valid) {
-      writeLicense({ key: String(key).trim(), plan: data.plan, expiresAt: data.expiresAt, lastVerifiedAt: Date.now() });
-      return { valid: true, plan: data.plan, expiresAt: data.expiresAt };
+    const result = await verifyKeyAgainstRtdb(key, machineId);
+    if (result.valid) {
+      writeLicense({ key: String(key).trim(), plan: result.plan, expiresAt: result.expiresAt, lastVerifiedAt: Date.now() });
+      return result;
     }
-    return { valid: false, reason: data.reason || 'invalid' };
+    return result;
   } catch (err) {
     return { valid: false, reason: 'network-error', error: err.message || 'Network error' };
   }
@@ -307,9 +340,9 @@ async function revalidateLicenseInBackground() {
   if (lic.lastVerifiedAt && Date.now() - lic.lastVerifiedAt < dayMs) return;
   try {
     const machineId = getMachineId();
-    const { data } = await postJson(`${LICENSE_SERVER_URL}/verify`, { key: lic.key, machineId });
-    if (data.valid) {
-      writeLicense({ ...lic, plan: data.plan, expiresAt: data.expiresAt, lastVerifiedAt: Date.now() });
+    const result = await verifyKeyAgainstRtdb(lic.key, machineId);
+    if (result.valid) {
+      writeLicense({ ...lic, plan: result.plan, expiresAt: result.expiresAt, lastVerifiedAt: Date.now() });
     } else {
       writeLicense({ ...lic, expiresAt: 0 });
     }

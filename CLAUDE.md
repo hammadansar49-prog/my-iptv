@@ -82,63 +82,73 @@ slow/unstable connection.
   is duplicated in both `player_screen.dart` and `live_tv_screen.dart` — keep them in sync if one
   changes.
 
-## License key system (new — `license-server/` / `license-server-php/`, plus gate screen in the PC app)
+## License key system (gate screen in the PC app, backed by theottdeals' own Firebase)
 
-The PC app is gated behind a license key so it can be sold as a subscription. Two halves:
+The PC app is gated behind a license key so it can be sold as a subscription.
 
-- **The license server** exists in **two implementations of the same API** — pick whichever
-  matches where it's actually hosted:
-  - `license-server/` — Node/Express version. Needs a Node-capable host (Render, Railway, a VPS).
-  - `license-server-php/` — **the one actually deployed**, plain PHP + `.htaccess` rewrites, built
-    because the user's existing Hostinger "Business Web Hosting" plan (used for theottdeals.com)
-    has no Node.js App support, only PHP — see `license-server-php/README.md` for upload steps.
-    Deployed at `https://theottdeals.com/license`. Both versions store data as a JSON file
-    (`licenses.json`, gitignored in both) — deliberately not a real database: the Node version hit
-    a `better-sqlite3` native-build failure (missing Python) on first attempt, and the PHP version
-    avoids needing MySQL credentials set up at all. **If both ever need changing together, change
-    both — they're independent copies of the same logic, not a shared codebase.**
-  - Either way: issues and verifies keys, serves live pricing, admin panel
-    (`public/admin.html` / `admin.html`) is password-gated via `ADMIN_PASSWORD` (env var for the
-    Node version, a `define()` in `config.php` for the PHP version), sent as a Bearer token on
-    every admin request.
-- **PC app integration** (`main.js`, `preload.js`, `src/index.html`, `src/renderer.js`,
-  `src/styles.css`): a new `view-license` screen (same `showView()` pattern as every other screen)
-  blocks `boot()` from running at all until `license:getStatus` reports a valid, unexpired key.
-  `main.js` talks to the license server via `LICENSE_SERVER_URL` (env var
-  `MYIPTV_LICENSE_SERVER_URL`, defaults to `http://localhost:4100` for local testing) — **this
-  must be pointed at the real deployed server URL (`https://theottdeals.com/license`) before
-  shipping a build**, or every user will try to verify against localhost and fail.
+**Current architecture (live)**: no separate license server at all — `main.js` talks directly to
+the **same Firebase Realtime Database the theottdeals.com admin panel already uses**
+(`https://theottdeals-reviews-default-rtdb.firebaseio.com`, project `theottdeals-reviews`), under a
+new `iptv/` tree (`iptv/plans`, `iptv/settings`, `iptv/keys`). The admin panel for generating keys
+and editing plans/pricing/WhatsApp number lives **inside theottdeals' own admin panel**
+(`theottdeals` repo, `notadmin.html` + `assets/js/pages/admin-iptv.js`, a "MY IPTV" sidebar
+button/modal added the same way every other feature there is built — see `admin-whatsapp.js` for
+the pattern it copies) — not a separate URL to remember or maintain.
 
-**Pricing is live, not hardcoded**: the license-gate screen calls `license:getPlans` (main.js) →
-`GET /plans` on the license server, so editing a plan's price/label/duration in the admin panel is
-reflected in the app immediately on next screen load — no rebuild needed. This was an explicit
-requirement; don't hardcode plan pricing back into `index.html`/`renderer.js`.
+- `main.js`: `IPTV_RTDB_URL` (env var `MYIPTV_RTDB_URL`, defaults to the theottdeals RTDB URL
+  above) + `rtdbRequest(method, path, body)` — plain HTTPS GET/PUT against RTDB's REST API
+  (`<url>/<path>.json`), no Firebase SDK/credentials needed since these are public client-safe
+  config values (same ones theottdeals' own `firebase-config.js` ships to browsers). `verifyKeyAgainstRtdb()`
+  reads a key doc by its key-string-as-path-id, and if unused, PUTs back the same doc with
+  `status: 'active'` — this exact transition (and nothing else) is what
+  `database.rules.json`'s `iptv/keys/$keyId` rule allows from an unauthenticated caller; admin
+  (logged into the theottdeals panel) can read/write anything under `iptv/`.
+- **The RTDB rule enabling this is not yet applied** — a security-rules change needs the user's own
+  review before going live (Claude Code's own safety classifier also blocks editing it
+  automatically). The exact JSON to add to `database.rules.json` under `"rules"` is documented in
+  the session that built this; ask the user if it's missing, or check whether `iptv/keys/$keyId`
+  already exists in the deployed rules via the Firebase console before assuming it's live.
+- `license-server/` (Node/Express) and `license-server-php/` (PHP, Hostinger-targeted) are
+  **earlier iterations, superseded and unused** — kept in the repo for reference only. Don't extend
+  either; extend the RTDB path in `main.js` and the `admin-iptv.js` module in the theottdeals repo
+  instead. (Their existence was itself a pivot: Node needed hosting the user didn't have without a
+  card, PHP worked on the user's existing Hostinger plan but still meant a second admin panel to
+  maintain — RTDB direct removes both problems by reusing infra that already existed.)
 
-**Key lifecycle**: a key's expiry clock starts on first successful `/verify` call (not at
+**PC app integration** (`main.js`, `preload.js`, `src/index.html`, `src/renderer.js`,
+`src/styles.css`): a `view-license` screen (same `showView()` pattern as every other screen) blocks
+`boot()` from running at all until `license:getStatus` reports a valid, unexpired key.
+
+**Pricing is live, not hardcoded**: the license-gate screen's `license:getPlans` reads
+`iptv/plans` straight from RTDB, so editing a plan's price/label/duration in the theottdeals admin
+panel is reflected in the app immediately on next screen load — no rebuild needed. Don't hardcode
+plan pricing back into `index.html`/`renderer.js`.
+
+**Key lifecycle**: a key's expiry clock starts on first successful `verify` call (not at
 generation) — unsold keys don't expire sitting in inventory. Once activated, a key is bound to the
 device's `machineId` (`getMachineId()` in `main.js`, a hash of hostname/platform/arch/username) and
 rejects verification from a different device. `main.js`'s `revalidateLicenseInBackground()` re-
-checks with the server at most once per day (non-blocking, keeps the last known local state if
-offline) so a revoked/expired key gets caught even if the app is never restarted; the renderer also
-polls `license:getStatus` locally every 30 minutes (`armLicenseWatch()`) and bounces back to the
-gate screen if it goes invalid.
+checks at most once per day (non-blocking, keeps the last known local state if offline) so a
+revoked/expired key gets caught even if the app is never restarted; the renderer also polls
+`license:getStatus` locally every 30 minutes (`armLicenseWatch()`) and bounces back to the gate
+screen if it goes invalid.
 
 **"See Plans" → WhatsApp flow**: on the license-gate screen, "See Plans" opens `view-plans`
 (`renderPlansScreen()` in `src/renderer.js`), listing every enabled plan with a "Get Package"
 button. Clicking it calls `openPackageOnWhatsApp(plan)`, which fetches the admin-set WhatsApp
-number (`license:getSettings` → `GET /settings` on the license server) and opens
+number (`license:getSettings` → RTDB `iptv/settings`) and opens
 `https://wa.me/<number>?text=<prefilled message>` via `shell.openExternal` in the main process
 (`ipcMain.handle('shell:openExternal', ...)` in `main.js` — deliberately restricted to
 `wa.me`/`api.whatsapp.com` URLs only, since it's callable from the renderer). The number and every
-plan are editable live from the admin panel (`license-server/public/admin.html`) and take effect
-immediately — the app always fetches fresh, nothing is cached across a screen visit.
+plan are editable live from the theottdeals admin panel and take effect immediately — the app
+always fetches fresh, nothing is cached across a screen visit.
 
 This is the actual purchase path today: customer picks a plan → WhatsApp opens with a message
-naming the exact plan/price → admin arranges payment manually → admin generates a key in the admin
-panel and sends it back → customer pastes it into the license-gate screen, which unlocks the app
-straight into its normal login flow (existing `boot()` call). Actual in-app payment/checkout is
-still not built — this WhatsApp handoff is the whole "purchase" step for now. Also not built:
-Android app licensing.
+naming the exact plan/price → admin arranges payment manually → admin generates a key in the
+theottdeals admin panel and sends it back → customer pastes it into the license-gate screen, which
+unlocks the app straight into its normal login flow (existing `boot()` call). Actual in-app
+payment/checkout is still not built — this WhatsApp handoff is the whole "purchase" step for now.
+Also not built: Android app licensing.
 
 ## Before pushing changes to GitHub
 This repo has `node_modules/`, `release/`, `vendor/` (bundled ffmpeg) and `*.log` gitignored — they
