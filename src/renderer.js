@@ -2857,12 +2857,22 @@ async function openPackageOnWhatsApp(plan) {
     // *bold* is WhatsApp's own markdown (single asterisks), not the app's
     // "**bold**" specs syntax — this is what actually renders bold once it
     // lands in the chat.
-    const message = `Hi TheOTTDeals! 👋\n\nI'd like to activate the *MY IPTV ${plan.label}* (${plan.price} ${plan.currency}, ${plan.duration_days} day(s)).\n\nPlease send me the activation details so I can get started.\n\nThank you!`;
+    const message = `Hi TheOTTDeals! 👋\n\nI'd like to activate the *MY IPTV ${plan.label}* (${formatPrice(plan.price, plan.currency)}, ${plan.duration_days} day(s)).\n\nPlease send me the activation details so I can get started.\n\nThank you!`;
     const url = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
     await window.api.openExternal(url);
   } catch {
     toast('Could not open WhatsApp — check your internet connection.');
   }
+}
+
+// Displays a price the way each currency is actually written, not just
+// "<number> <code>" for everything — a symbol currency (USD) shows as
+// "2$", a code currency (PKR, or anything else not in this map) keeps
+// showing its code after the number.
+const CURRENCY_SYMBOLS = { USD: '$' };
+function formatPrice(price, currency) {
+  const symbol = CURRENCY_SYMBOLS[String(currency || '').toUpperCase()];
+  return symbol ? `${price}${symbol}` : `${price} ${currency}`;
 }
 
 // Renders a plan's/trial's optional "specs" text with the same lightweight
@@ -2928,7 +2938,7 @@ async function renderPlansInto(host, { afterTrialClaim } = {}) {
     ? licensePlansCache.map((p, i) => `
       <div class="plan-card">
         <div class="plan-card-label">${p.label}</div>
-        <div class="plan-card-price">${p.price} ${p.currency}<span class="plan-card-unit"> &middot; ${p.duration_days} day(s)</span></div>
+        <div class="plan-card-price">${formatPrice(p.price, p.currency)}<span class="plan-card-unit"> &middot; ${p.duration_days} day(s)</span></div>
         ${renderSpecsMarkdown(p.specs)}
         <button class="btn-get-package" data-plan-index="${i}" type="button">Get Package</button>
       </div>
