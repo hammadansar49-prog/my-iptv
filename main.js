@@ -482,7 +482,21 @@ ipcMain.handle('shell:openDownloadUrl', (_e, url) => {
 // createdAt) — see armAnnouncementCheck in src/renderer.js for the dismiss
 // bookkeeping.
 // ==============================================================
-ipcMain.handle('announcement:get', () => ({ ok: true, announcement: iptvLiveCache.announcement }));
+// Deliberately NOT read from iptvLiveCache like getPlans/getSettings are —
+// this runs once (silently, no visible loading UI to spare the user from)
+// right at boot, which can race the cache's own first population from
+// startIptvLiveSync and wrongly read "no announcement" on a cold start.
+// Correctness matters more than shaving one network round trip here.
+ipcMain.handle('announcement:get', async () => {
+  try {
+    const data = await rtdbRequest('GET', '/iptv/announcement');
+    if (!data || !data.text) return { ok: true, announcement: null };
+    if (data.expires_at && data.expires_at < Date.now()) return { ok: true, announcement: null };
+    return { ok: true, announcement: data };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Network error', announcement: null };
+  }
+});
 
 // ==============================================================
 // Update check. Admin publishes the latest version + download link (and an
@@ -501,9 +515,12 @@ function compareVersions(a, b) {
   return 0;
 }
 
-ipcMain.handle('update:check', () => {
+// Same reasoning as announcement:get above — read live, not from
+// iptvLiveCache, so a cold-boot check can't race the cache's own first
+// population and wrongly conclude "no update".
+ipcMain.handle('update:check', async () => {
   try {
-    const data = iptvLiveCache.update;
+    const data = await rtdbRequest('GET', '/iptv/update');
     const currentVersion = app.getVersion();
     if (!data || !data.version) return { ok: true, available: false, currentVersion };
     const available = compareVersions(data.version, currentVersion) > 0;
