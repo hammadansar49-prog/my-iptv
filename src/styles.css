@@ -61,18 +61,19 @@ input { font-family: inherit; }
    min-height regardless of how much specs text it has, and however many
    plans the admin adds, the grid just wraps to more rows at the same
    column width instead of stretching/shrinking individual cards. */
-.plans-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; align-items: stretch; }
+.plans-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; align-items: stretch; }
 .plan-card {
-  display: flex; flex-direction: column; background: var(--bg-3); border: 1px solid var(--border);
-  border-radius: 12px; padding: 14px; min-height: 0;
+  display: flex; flex-direction: column; text-align: left; background: rgba(255,255,255,.035);
+  backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px; padding: 18px; min-height: 0;
 }
-.plan-card-label { font-size: 15px; font-weight: 700; color: var(--text); }
-.plan-card-price { font-size: 13px; font-weight: 600; color: var(--accent); margin-top: 4px; }
+.plan-card-label { font-size: 16px; font-weight: 700; color: var(--text); }
+.plan-card-price { font-size: 13.5px; font-weight: 600; color: var(--accent); margin-top: 5px; }
 .plan-card-unit { font-weight: 400; color: var(--text-dim); }
-.plan-card-specs { margin: 10px 0 0; flex: 1; font-size: 11.5px; color: var(--text-dim); line-height: 1.45; overflow-wrap: break-word; }
-.plan-card-specs p { margin: 0 0 8px; }
+.plan-card-specs { margin: 12px 0 0; flex: 1; font-size: 13px; color: var(--text-dim); line-height: 1.6; overflow-wrap: break-word; }
+.plan-card-specs p { margin: 0 0 10px; }
 .plan-card-specs p:last-child { margin-bottom: 0; }
-.plan-card-specs h4 { font-size: 12.5px; font-weight: 700; color: var(--text); margin: 0 0 6px; }
+.plan-card-specs h4 { font-size: 13.5px; font-weight: 700; color: var(--text); margin: 0 0 7px; }
 .plan-card-specs strong { color: var(--text); font-weight: 700; }
 .plan-card .btn-get-package,
 .plan-card .btn-get-trial { margin-top: 12px; width: 100%; }
@@ -450,7 +451,7 @@ html[data-theme="light"] #view-player { background: #000; }
 .ann-star.filled { color: #f0c852; }
 .ann-comment { width: 100%; margin-bottom: 14px; resize: vertical; min-height: 44px; }
 .app-modal-card .btn-primary { width: 100%; }
-.app-modal-card.pro-modal-card { width: min(760px, 92vw); }
+.app-modal-card.pro-modal-card { width: min(760px, 92vw); text-align: left; }
 .lang-picker-list { display: flex; flex-direction: column; gap: 8px; }
 .lang-picker-btn { width: 100%; }
 
