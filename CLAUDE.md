@@ -116,9 +116,22 @@ offline) so a revoked/expired key gets caught even if the app is never restarted
 polls `license:getStatus` locally every 30 minutes (`armLicenseWatch()`) and bounces back to the
 gate screen if it goes invalid.
 
-**Not yet built** (explicitly out of scope when this was implemented): actual payment/checkout —
-today the admin manually generates a key after being paid some other way (WhatsApp, bank transfer,
-etc.) and hands it to the customer. Also not built: Android app licensing.
+**"See Plans" → WhatsApp flow**: on the license-gate screen, "See Plans" opens `view-plans`
+(`renderPlansScreen()` in `src/renderer.js`), listing every enabled plan with a "Get Package"
+button. Clicking it calls `openPackageOnWhatsApp(plan)`, which fetches the admin-set WhatsApp
+number (`license:getSettings` → `GET /settings` on the license server) and opens
+`https://wa.me/<number>?text=<prefilled message>` via `shell.openExternal` in the main process
+(`ipcMain.handle('shell:openExternal', ...)` in `main.js` — deliberately restricted to
+`wa.me`/`api.whatsapp.com` URLs only, since it's callable from the renderer). The number and every
+plan are editable live from the admin panel (`license-server/public/admin.html`) and take effect
+immediately — the app always fetches fresh, nothing is cached across a screen visit.
+
+This is the actual purchase path today: customer picks a plan → WhatsApp opens with a message
+naming the exact plan/price → admin arranges payment manually → admin generates a key in the admin
+panel and sends it back → customer pastes it into the license-gate screen, which unlocks the app
+straight into its normal login flow (existing `boot()` call). Actual in-app payment/checkout is
+still not built — this WhatsApp handoff is the whole "purchase" step for now. Also not built:
+Android app licensing.
 
 ## Before pushing changes to GitHub
 This repo has `node_modules/`, `release/`, `vendor/` (bundled ffmpeg) and `*.log` gitignored — they

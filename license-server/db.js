@@ -7,11 +7,17 @@ const path = require('path');
 
 const DB_FILE = path.join(__dirname, 'licenses.json');
 
+// Pre-filled with the number given when this system was set up; change it
+// any time from the admin panel's "WhatsApp number" card.
+const DEFAULT_WHATSAPP_NUMBER = '923341100761';
+
 function load() {
   try {
-    return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+    const parsed = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+    if (!parsed.settings) parsed.settings = { whatsappNumber: DEFAULT_WHATSAPP_NUMBER };
+    return parsed;
   } catch {
-    return { nextKeyId: 1, nextPlanId: 1, keys: [], plans: [] };
+    return { nextKeyId: 1, nextPlanId: 1, keys: [], plans: [], settings: { whatsappNumber: DEFAULT_WHATSAPP_NUMBER } };
   }
 }
 
@@ -113,5 +119,15 @@ module.exports = {
     data.plans = data.plans.filter((p) => p.id !== Number(id));
     save(data);
     return data.plans.length < before;
+  },
+
+  // ---- settings ----
+  getSettings() {
+    return data.settings;
+  },
+  updateSettings(patch) {
+    Object.assign(data.settings, patch);
+    save(data);
+    return data.settings;
   }
 };

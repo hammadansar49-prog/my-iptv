@@ -102,6 +102,17 @@ app.delete('/admin/plans/:id', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Settings (WhatsApp number the "Get Package" button messages) ----
+app.get('/settings', (_req, res) => {
+  res.json({ ok: true, settings: db.getSettings() });
+});
+
+app.put('/admin/settings', requireAdmin, (req, res) => {
+  const { whatsappNumber } = req.body || {};
+  const settings = db.updateSettings({ whatsappNumber: whatsappNumber !== undefined ? String(whatsappNumber).trim() : db.getSettings().whatsappNumber });
+  res.json({ ok: true, settings });
+});
+
 app.post('/verify', (req, res) => {
   const { key, machineId } = req.body || {};
   if (!key || !machineId) {

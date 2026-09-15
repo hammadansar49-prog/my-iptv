@@ -2603,20 +2603,48 @@ async function updateProBadge() {
   } catch { /* badge just stays hidden */ }
 }
 
-async function renderLicensePlans() {
-  const host = $('#license-plans');
+// Opens WhatsApp (via the main process — renderer can't launch external
+// apps directly) with a pre-filled, professional message naming the chosen
+// package, so the admin knows exactly what the customer wants without any
+// back-and-forth before payment.
+async function openPackageOnWhatsApp(plan) {
+  try {
+    const res = await window.api.licenseGetSettings();
+    const number = (res && res.settings && res.settings.whatsappNumber) || '';
+    if (!number) return;
+    const message = `Hi TheOTTDeals, I want to purchase the ${plan.label} package (${plan.price} ${plan.currency}, ${plan.duration_days} days). Please share payment details.`;
+    const url = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
+    await window.api.openExternal(url);
+  } catch { /* nothing to show the user for this — the button just won't open */ }
+}
+
+async function renderPlansScreen() {
+  const host = $('#plans-list');
   if (!host) return;
+  host.innerHTML = '<div class="license-subtitle">Loading plans...</div>';
   try {
     const res = await window.api.licenseGetPlans();
     licensePlansCache = (res && res.plans) || [];
   } catch { licensePlansCache = []; }
-  if (!licensePlansCache.length) { host.innerHTML = ''; return; }
-  host.innerHTML = licensePlansCache.map((p) => `
-    <div class="license-plan">
-      <div class="lp-label">${p.label}</div>
-      <div class="lp-price">${p.price} ${p.currency}</div>
+  if (!licensePlansCache.length) {
+    host.innerHTML = '<div class="license-subtitle">No plans available right now.</div>';
+    return;
+  }
+  host.innerHTML = licensePlansCache.map((p, i) => `
+    <div class="plan-row">
+      <div class="plan-row-info">
+        <div class="pr-label">${p.label}</div>
+        <div class="pr-price">${p.price} ${p.currency} &middot; ${p.duration_days} day(s)</div>
+      </div>
+      <button class="btn-get-package" data-plan-index="${i}" type="button">Get Package</button>
     </div>
   `).join('');
+  host.querySelectorAll('.btn-get-package').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const plan = licensePlansCache[Number(btn.dataset.planIndex)];
+      if (plan) openPackageOnWhatsApp(plan);
+    });
+  });
 }
 
 function licenseSetError(msg) {
@@ -2627,6 +2655,10 @@ function licenseSetError(msg) {
 function initLicenseGate() {
   const btn = $('#btn-license-verify');
   const input = $('#license-key-input');
+  const seePlansBtn = $('#btn-see-plans');
+  const backBtn = $('#btn-plans-back');
+  if (seePlansBtn) seePlansBtn.addEventListener('click', () => { showView('plans'); renderPlansScreen(); });
+  if (backBtn) backBtn.addEventListener('click', () => showView('license'));
   if (!btn || !input) return;
   const submit = async () => {
     const key = input.value.trim();
@@ -2670,7 +2702,6 @@ function armLicenseWatch() {
       const status = await window.api.licenseGetStatus();
       if (!status.valid) {
         showView('license');
-        renderLicensePlans();
       }
     } catch { /* ignore — don't lock the user out over a transient error */ }
   }, 30 * 60 * 1000);
@@ -2840,7 +2871,6 @@ async function startup() {
   try { status = await window.api.licenseGetStatus(); } catch { status = { valid: false }; }
   if (!status.valid) {
     showView('license');
-    renderLicensePlans();
     return;
   }
   await updateProBadge();

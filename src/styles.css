@@ -37,6 +37,18 @@ input { font-family: inherit; }
 .lp-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
 .lp-price { font-size: 15px; font-weight: 700; color: var(--text); }
 .pro-badge { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .5px; padding: 3px 7px; border-radius: 6px; margin-left: -4px; }
+.btn-secondary { width: 100%; margin-top: 12px; padding: 10px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-weight: 600; font-size: 13px; }
+.btn-secondary:hover { border-color: var(--accent); }
+
+/* ---------- PLANS SCREEN ---------- */
+#view-plans.active { align-items: center; justify-content: center; background: radial-gradient(circle at 30% 20%, #2a2050, #14111f 70%); }
+.plans-card { width: 460px; max-height: 86vh; display: flex; flex-direction: column; }
+.plans-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; max-height: 50vh; overflow-y: auto; }
+.plan-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.plan-row-info .pr-label { font-size: 14px; font-weight: 600; color: var(--text); }
+.plan-row-info .pr-price { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.btn-get-package { flex-shrink: 0; padding: 9px 16px; background: linear-gradient(135deg, #22c55e, #16a34a); border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 12px; white-space: nowrap; }
+.btn-get-package:hover { filter: brightness(1.08); }
 
 /* ---------- LOGIN ---------- */
 #view-login.active { align-items: center; justify-content: center; background: radial-gradient(circle at 30% 20%, #2a2050, #14111f 70%); }

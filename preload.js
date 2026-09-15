@@ -31,5 +31,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   licenseGetStatus: () => ipcRenderer.invoke('license:getStatus'),
   licenseVerify: (key) => ipcRenderer.invoke('license:verify', key),
-  licenseGetPlans: () => ipcRenderer.invoke('license:getPlans')
+  licenseGetPlans: () => ipcRenderer.invoke('license:getPlans'),
+  licenseGetSettings: () => ipcRenderer.invoke('license:getSettings'),
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url)
 });

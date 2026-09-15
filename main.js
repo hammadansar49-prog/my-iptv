@@ -263,6 +263,26 @@ ipcMain.handle('license:getPlans', async () => {
   }
 });
 
+ipcMain.handle('license:getSettings', async () => {
+  try {
+    const text = await fetchText(`${LICENSE_SERVER_URL}/settings`);
+    const data = JSON.parse(text);
+    return { ok: true, settings: data.settings || {} };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Network error', settings: {} };
+  }
+});
+
+ipcMain.handle('shell:openExternal', (_e, url) => {
+  // Only ever used for the WhatsApp deep link built from admin-configured
+  // data, but keep it locked to wa.me/https URLs regardless of caller.
+  if (typeof url === 'string' && /^https:\/\/(wa\.me|api\.whatsapp\.com)\//.test(url)) {
+    shell.openExternal(url);
+    return true;
+  }
+  return false;
+});
+
 ipcMain.handle('license:verify', async (_e, key) => {
   try {
     const machineId = getMachineId();

@@ -65,6 +65,18 @@
 
   <div class="card">
     <div class="row" style="justify-content:space-between">
+      <strong>WhatsApp number</strong>
+      <span class="sub" style="margin:0">The app's "Get Package" button opens WhatsApp to this number.</span>
+    </div>
+    <div class="row">
+      <input id="waNumber" placeholder="e.g. 923001234567 (country code, no + or spaces)" style="flex:1" />
+      <button id="saveWaBtn">Save</button>
+    </div>
+    <div class="err" id="waErr"></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
       <strong>Pricing plans</strong>
       <span class="sub" style="margin:0">Shown live in the app's lock screen &mdash; edit here, app updates instantly.</span>
     </div>
@@ -129,8 +141,28 @@ $('#loginBtn').addEventListener('click', async () => {
     $('#app').style.display = 'block';
     loadPlans();
     loadKeys();
+    loadSettings();
   } catch (e) {
     $('#loginErr').textContent = e.message;
+  }
+});
+
+async function loadSettings() {
+  try {
+    const data = await adminFetch('/settings');
+    $('#waNumber').value = (data.settings && data.settings.whatsappNumber) || '';
+  } catch (e) { /* ignore, field stays empty */ }
+}
+
+$('#saveWaBtn').addEventListener('click', async () => {
+  $('#waErr').textContent = '';
+  try {
+    await adminFetch('/admin/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ whatsappNumber: $('#waNumber').value.trim() }),
+    });
+  } catch (e) {
+    $('#waErr').textContent = e.message;
   }
 });
 
