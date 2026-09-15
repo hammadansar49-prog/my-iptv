@@ -2877,6 +2877,18 @@ async function openPackageOnWhatsApp(plan) {
   }
 }
 
+// Turns a plan's admin-set custom_bg fields (theottdeals admin panel's
+// "Custom card background" color/gradient picker) into an inline style
+// attribute — kept in sync with the admin panel's own planCardBackground()
+// preview swatch (admin-iptv.js), same rule on both sides.
+function planCardBackgroundStyle(p) {
+  if (!p.custom_bg || !p.bg_color1) return '';
+  const bg = (p.bg_type === 'gradient' && p.bg_color2)
+    ? `linear-gradient(160deg, ${p.bg_color1}, ${p.bg_color2})`
+    : p.bg_color1;
+  return ` style="background:${bg}"`;
+}
+
 // Displays a price the way each currency is actually written, not just
 // "<number> <code>" for everything — a symbol currency (USD) shows as
 // "2$", a code currency (PKR, or anything else not in this map) keeps
@@ -2948,7 +2960,7 @@ async function renderPlansInto(host, { afterTrialClaim } = {}) {
 
   const plansHtml = licensePlansCache.length
     ? licensePlansCache.map((p, i) => `
-      <div class="plan-card">
+      <div class="plan-card"${planCardBackgroundStyle(p)}>
         <div class="plan-card-label">${p.label}</div>
         <div class="plan-card-price">${formatPrice(p.price, p.currency)}<span class="plan-card-unit"> &middot; ${p.duration_days} day(s)</span></div>
         ${renderSpecsMarkdown(p.specs)}
