@@ -42,7 +42,7 @@ input { font-family: inherit; }
 .pro-badge.pro-badge-warn { background: linear-gradient(135deg, #ef4444, #f97316); }
 
 /* ---------- PRO plan popup (click the topbar badge) ---------- */
-.pro-modal-card { width: min(760px, 92vw); max-height: 86vh; overflow-y: auto; position: relative; text-align: left; }
+.pro-modal-card { max-height: 86vh; overflow-y: auto; position: relative; text-align: left; }
 .pro-modal-close { position: absolute; top: 12px; right: 12px; }
 .pro-modal-current { background: var(--bg-3); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 18px; }
 .pro-modal-current-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; }
@@ -64,7 +64,7 @@ input { font-family: inherit; }
 .plans-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; align-items: stretch; }
 .plan-card {
   display: flex; flex-direction: column; background: var(--bg-3); border: 1px solid var(--border);
-  border-radius: 12px; padding: 16px; min-height: 220px;
+  border-radius: 12px; padding: 14px; min-height: 0;
 }
 .plan-card-label { font-size: 15px; font-weight: 700; color: var(--text); }
 .plan-card-price { font-size: 13px; font-weight: 600; color: var(--accent); margin-top: 4px; }
@@ -438,6 +438,7 @@ html[data-theme="light"] #view-player { background: #000; }
 .app-modal-title { font-size: 18px; font-weight: 700; margin-bottom: 14px; }
 .app-modal-body { font-size: 14px; color: var(--text-dim); line-height: 1.5; margin-bottom: 20px; white-space: pre-wrap; }
 .app-modal-card .btn-primary { width: 100%; }
+.app-modal-card.pro-modal-card { width: min(760px, 92vw); }
 .lang-picker-list { display: flex; flex-direction: column; gap: 8px; }
 .lang-picker-btn { width: 100%; }
 
