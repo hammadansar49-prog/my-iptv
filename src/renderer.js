@@ -3035,7 +3035,11 @@ function armAnnouncementAndUpdateWatch() {
 // 2-minute poll. See startLicenseStream in main.js.
 function armLicenseInvalidationPush() {
   window.api.onLicenseInvalidated(() => {
-    if (state.nowPlaying) { stopHistoryTracking(); if (player) player.destroy(); state.nowPlaying = null; }
+    if (state.nowPlaying) { stopHistoryTracking(); state.nowPlaying = null; }
+    // Covers both the fullscreen player and the inline Live TV preview
+    // (a separate code path that shares the same underlying <video>/player
+    // instance) — either one could be the thing actually making sound.
+    stopLivePreview();
     showView('license');
   });
 }
