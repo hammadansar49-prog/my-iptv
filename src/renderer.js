@@ -1135,6 +1135,11 @@ async function renderUpdatesSettings(pane) {
         $('#updates-new-version').textContent = `v${info.latestVersion}`;
         $('#updates-notes').textContent = info.notes || '';
         downloadRow.hidden = false;
+        // Both rows get the "an update is waiting" highlight — the top one
+        // ("Current version") is what actually caught the user's eye first
+        // in testing, not just the download row below it.
+        pane.querySelector('.settings-row').classList.add('settings-row-update-available');
+        downloadRow.classList.add('settings-row-update-available');
         $('#updates-download-btn').onclick = () => {
           if (info.downloadUrl) window.api.openDownloadUrl(info.downloadUrl);
         };
