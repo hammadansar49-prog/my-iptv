@@ -2642,7 +2642,14 @@ let licensePlansCache = null;
 async function updateProBadge() {
   try {
     const status = await window.api.licenseGetStatus();
-    $('#pro-badge').hidden = !status.valid;
+    const badge = $('#pro-badge');
+    badge.hidden = !status.valid;
+    if (!status.valid || !status.expiresAt) { badge.textContent = 'PRO'; return; }
+    const daysLeft = Math.ceil((status.expiresAt - Date.now()) / (24 * 60 * 60 * 1000));
+    // Only worth calling out once it's close — a fresh 30/60/90-day key
+    // doesn't need a running countdown cluttering the topbar every day.
+    badge.textContent = daysLeft <= 7 ? `PRO · ${Math.max(daysLeft, 0)}d left` : 'PRO';
+    badge.classList.toggle('pro-badge-warn', daysLeft <= 7);
   } catch { /* badge just stays hidden */ }
 }
 
@@ -2753,6 +2760,8 @@ function armLicenseWatch() {
       const status = await window.api.licenseRecheckNow();
       if (!status.valid) {
         showView('license');
+      } else {
+        updateProBadge();
       }
     } catch { /* ignore — don't lock the user out over a transient error */ }
   }, 2 * 60 * 1000);
@@ -3020,10 +3029,22 @@ function armAnnouncementAndUpdateWatch() {
   }, 30 * 60 * 1000);
 }
 
+// Pushed from the main process the instant its live RTDB stream sees this
+// key end (revoked, or its expires_at patched into the past) — cuts
+// straight to the license screen even mid-playback, no waiting for the
+// 2-minute poll. See startLicenseStream in main.js.
+function armLicenseInvalidationPush() {
+  window.api.onLicenseInvalidated(() => {
+    if (state.nowPlaying) { stopHistoryTracking(); if (player) player.destroy(); state.nowPlaying = null; }
+    showView('license');
+  });
+}
+
 async function startup() {
   await loadStore();
   applyLanguage(settings().language);
   initLicenseGate();
+  armLicenseInvalidationPush();
   armLicenseWatch();
   let status;
   try { status = await window.api.licenseGetStatus(); } catch { status = { valid: false }; }

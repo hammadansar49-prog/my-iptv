@@ -106,6 +106,8 @@ app.whenReady().then(async () => {
   await startProxyServer();
   createWindow();
   revalidateLicenseInBackground();
+  const cachedLicense = readLicense();
+  if (cachedLicense && cachedLicense.key) startLicenseStream(cachedLicense.key);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -421,6 +423,7 @@ ipcMain.handle('license:verify', async (_e, key) => {
     const result = await verifyKeyAgainstRtdb(key, machineId);
     if (result.valid) {
       writeLicense({ key: String(key).trim(), plan: result.plan, expiresAt: result.expiresAt, lastVerifiedAt: Date.now() });
+      startLicenseStream(key);
       return result;
     }
     return result;
@@ -428,6 +431,94 @@ ipcMain.handle('license:verify', async (_e, key) => {
     return { valid: false, reason: 'network-error', error: err.message || 'Network error' };
   }
 });
+
+// ==============================================================
+// Live (Server-Sent Events) watch on this key's own RTDB node, so an admin
+// revoking/expiring a key reaches an already-running app the instant it
+// happens instead of waiting on the polling fallback (armLicenseWatch in
+// src/renderer.js, every 2 minutes — kept as a safety net for when this
+// stream is down, e.g. no internet, or between reconnect attempts).
+// RTDB's REST API pushes `put`/`patch` events over a plain HTTP GET when
+// asked for `Accept: text/event-stream` — no SDK/auth needed, matching the
+// rest of this file's plain-HTTPS approach.
+// ==============================================================
+let licenseStreamReq = null;
+let licenseStreamRetryTimer = null;
+
+function stopLicenseStream() {
+  if (licenseStreamRetryTimer) { clearTimeout(licenseStreamRetryTimer); licenseStreamRetryTimer = null; }
+  if (licenseStreamReq) { try { licenseStreamReq.destroy(); } catch {} licenseStreamReq = null; }
+}
+
+function scheduleLicenseStreamReconnect(key) {
+  if (licenseStreamRetryTimer) return;
+  licenseStreamRetryTimer = setTimeout(() => {
+    licenseStreamRetryTimer = null;
+    startLicenseStream(key);
+  }, 5000);
+}
+
+// `payload.path` is "/" when the whole key node changed (e.g. deleted, or
+// the app's own activation write), or a sub-path like "/status" when only
+// one field was patched (exactly what the admin panel's "End Key"/"Extend"
+// buttons do). Either way, only status/expires_at changes matter here.
+function handleLicenseStreamEvent(key, payload) {
+  const lic = readLicense();
+  if (!lic || lic.key !== key) return;
+
+  let status;
+  let expiresAt = lic.expiresAt;
+  if (payload.path === '/') {
+    if (!payload.data) { status = 'revoked'; expiresAt = 0; }
+    else { status = payload.data.status; expiresAt = payload.data.expires_at || 0; }
+  } else if (payload.path === '/status') {
+    status = payload.data;
+  } else if (payload.path === '/expires_at') {
+    expiresAt = payload.data || 0;
+    status = 'active'; // an expires_at-only patch (Extend) never touches status
+  } else {
+    return; // machine_ids/device_count/etc. changing doesn't affect validity
+  }
+
+  const now = Date.now();
+  if (status !== 'active' || !expiresAt || expiresAt <= now) {
+    writeLicense({ ...lic, expiresAt: 0 });
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('license:invalidated');
+  } else if (expiresAt !== lic.expiresAt) {
+    writeLicense({ ...lic, expiresAt, lastVerifiedAt: now });
+  }
+}
+
+function startLicenseStream(key) {
+  stopLicenseStream();
+  const trimmedKey = String(key || '').trim();
+  if (!trimmedKey) return;
+  const u = new URL(`${IPTV_RTDB_URL}/iptv/keys/${encodeURIComponent(trimmedKey)}.json`);
+  const lib = u.protocol === 'https:' ? https : http;
+  let buffer = '';
+  const req = lib.get(u, { headers: { Accept: 'text/event-stream' } }, (res) => {
+    res.setEncoding('utf8');
+    res.on('data', (chunk) => {
+      buffer += chunk;
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const rawEvent = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const eventMatch = /^event: (.+)$/m.exec(rawEvent);
+        const dataMatch = /^data: (.+)$/m.exec(rawEvent);
+        if (!eventMatch || !dataMatch) continue;
+        if (eventMatch[1] !== 'put' && eventMatch[1] !== 'patch') continue;
+        try {
+          handleLicenseStreamEvent(trimmedKey, JSON.parse(dataMatch[1]));
+        } catch { /* malformed event — wait for the next one */ }
+      }
+    });
+    res.on('end', () => scheduleLicenseStreamReconnect(trimmedKey));
+    res.on('error', () => scheduleLicenseStreamReconnect(trimmedKey));
+  });
+  req.on('error', () => scheduleLicenseStreamReconnect(trimmedKey));
+  licenseStreamReq = req;
+}
 
 // Frequent, lightweight, read-only poll so a revoke/expiry from the admin
 // panel reaches an already-running app within minutes instead of waiting for

@@ -37,5 +37,10 @@ contextBridge.exposeInMainWorld('api', {
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   openDownloadUrl: (url) => ipcRenderer.invoke('shell:openDownloadUrl', url),
   getAnnouncement: () => ipcRenderer.invoke('announcement:get'),
-  checkForUpdate: () => ipcRenderer.invoke('update:check')
+  checkForUpdate: () => ipcRenderer.invoke('update:check'),
+  onLicenseInvalidated: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('license:invalidated', handler);
+    return () => ipcRenderer.removeListener('license:invalidated', handler);
+  }
 });
