@@ -44,17 +44,39 @@ input { font-family: inherit; }
 
 /* ---------- PLANS SCREEN ---------- */
 #view-plans.active { align-items: center; justify-content: center; background: radial-gradient(circle at 30% 20%, #2a2050, #14111f 70%); }
-.plans-card { width: 460px; max-height: 86vh; display: flex; flex-direction: column; }
-.plans-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; max-height: 50vh; overflow-y: auto; }
-.plan-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
-.plan-row-info .pr-label { font-size: 14px; font-weight: 600; color: var(--text); }
-.plan-row-info .pr-price { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-.btn-get-package { flex-shrink: 0; padding: 9px 16px; background: linear-gradient(135deg, #22c55e, #16a34a); border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 12px; white-space: nowrap; }
+.plans-card { width: min(900px, 92vw); max-height: 86vh; display: flex; flex-direction: column; }
+.plans-list { max-height: 62vh; overflow-y: auto; margin-bottom: 4px; padding: 2px; }
+
+/* Uniform-size card grid — every card (trial or paid) gets the same
+   min-height regardless of how much specs text it has, and however many
+   plans the admin adds, the grid just wraps to more rows at the same
+   column width instead of stretching/shrinking individual cards. */
+.plans-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; align-items: stretch; }
+.plan-card {
+  display: flex; flex-direction: column; background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px; min-height: 220px;
+}
+.plan-card-label { font-size: 15px; font-weight: 700; color: var(--text); }
+.plan-card-price { font-size: 13px; font-weight: 600; color: var(--accent); margin-top: 4px; }
+.plan-card-unit { font-weight: 400; color: var(--text-dim); }
+.plan-card-specs { list-style: none; margin: 10px 0 0; padding: 0; flex: 1; }
+.plan-card-specs li { font-size: 11.5px; color: var(--text-dim); padding: 3px 0 3px 14px; position: relative; line-height: 1.35; }
+.plan-card-specs li::before { content: '✓'; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
+.plan-card .btn-get-package,
+.plan-card .btn-get-trial { margin-top: 12px; width: 100%; }
+
+.btn-get-package { padding: 9px 16px; background: linear-gradient(135deg, #22c55e, #16a34a); border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 12px; white-space: nowrap; }
 .btn-get-package:hover { filter: brightness(1.08); }
-.plan-row-trial { border-color: var(--accent); background: linear-gradient(135deg, rgba(139,92,246,.12), rgba(168,85,247,.06)); }
-.btn-get-trial { flex-shrink: 0; padding: 9px 16px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 12px; white-space: nowrap; }
+
+/* Trial card is deliberately gold, distinct from every paid (green-button)
+   plan card, so it reads at a glance as "the free one". */
+.plan-card-trial { border-color: #d4af37; background: linear-gradient(160deg, rgba(212,175,55,.16), rgba(212,175,55,.05)); }
+.plan-card-trial .plan-card-label { color: #f0c852; }
+.plan-card-trial .plan-card-price { color: #d4af37; }
+.plan-card-trial .plan-card-specs li::before { color: #d4af37; }
+.btn-get-trial { padding: 9px 16px; background: linear-gradient(135deg, #d4af37, #b8912c); border: none; border-radius: 8px; color: #221a05; font-weight: 700; font-size: 12px; white-space: nowrap; }
 .btn-get-trial:hover:not(:disabled) { filter: brightness(1.08); }
-.btn-get-trial:disabled { background: var(--bg-3); color: var(--text-dim); cursor: not-allowed; }
+.btn-get-trial:disabled { background: var(--bg-2); color: var(--text-dim); cursor: not-allowed; }
 
 /* ---------- LOGIN ---------- */
 #view-login.active { align-items: center; justify-content: center; background: radial-gradient(circle at 30% 20%, #2a2050, #14111f 70%); }

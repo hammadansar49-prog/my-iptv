@@ -150,8 +150,13 @@ unlocks the app straight into its normal login flow (existing `boot()` call). Ac
 payment/checkout is still not built — this WhatsApp handoff is the whole "purchase" step for now.
 Also not built: Android app licensing.
 
-**Free trial (24h, one per device)**: a "Get Free Trial" button on the plans screen
-(`renderPlansScreen()` in `src/renderer.js`) calls `trial:claim` (`main.js`). This is
+**Free trial (admin-configurable duration/on-off, one per device)**: a "Get Free Trial" button on
+the plans screen (`renderPlansScreen()` in `src/renderer.js`) calls `trial:claim` (`main.js`). The
+duration (default 24h), whether it's offered at all, and its specs/description text are set from
+the theottdeals admin panel's "Free Trial" section (`admin-iptv.js`, `iptv/trial_config` in RTDB —
+`{enabled, duration_hours, specs}`); `getTrialConfig()` in `main.js` reads this before every
+`trial:checkAvailability`/`trial:claim` call, so an admin change (turning it off, or changing
+24h to 3 days) takes effect immediately, no rebuild. This is
 **deliberately not** the same mechanism as a purchased key — there's no row in `iptv/keys` for it
 at all. Instead, `iptv/trials/{machineId}` is a create-once record: the RTDB rule
 (`iptv/trials/$machineId`, `.write: "auth != null || !data.exists()"`) lets the app write it

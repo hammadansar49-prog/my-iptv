@@ -2747,30 +2747,40 @@ async function openPackageOnWhatsApp(plan) {
   }
 }
 
+// Renders a plan's optional multi-line "specs" text as a bullet list — one
+// bullet per non-empty line — so the admin can write plain lines in the
+// textarea and get a proper feature list here, no markup needed on their end.
+function specsListHtml(specs) {
+  if (!specs) return '';
+  const lines = String(specs).split('\n').map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return '';
+  return `<ul class="plan-card-specs">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`;
+}
+
 async function renderPlansScreen() {
   const host = $('#plans-list');
   if (!host) return;
   host.innerHTML = '<div class="license-subtitle">Loading plans...</div>';
 
-  // Free trial availability is decided server-side (see trial:checkAvailability
-  // in main.js) — it's keyed to this device's hardware fingerprint, not to
-  // anything stored locally, specifically so reinstalling the app doesn't
-  // grant a second one.
-  let trialAvailable = false;
+  // Free trial availability/duration/specs and whether it's offered at all
+  // are decided server-side (see trial:checkAvailability in main.js) — kept
+  // in sync with getMachineId()'s hardware fingerprint, not anything stored
+  // locally, specifically so reinstalling the app doesn't grant a second one.
+  let trial = { available: false, enabled: false, specs: '', durationHours: 24 };
   try {
     const trialRes = await window.api.checkTrialAvailability();
-    trialAvailable = !!(trialRes && trialRes.available);
-  } catch { trialAvailable = false; }
+    if (trialRes) trial = { available: !!trialRes.available, enabled: trialRes.enabled !== false, specs: trialRes.specs || '', durationHours: trialRes.durationHours || 24 };
+  } catch { /* trial card just won't show */ }
 
-  const trialHtml = `
-    <div class="plan-row plan-row-trial">
-      <div class="plan-row-info">
-        <div class="pr-label">Free Trial</div>
-        <div class="pr-price">24 hours &middot; one per device</div>
-      </div>
-      <button class="btn-get-trial" id="btn-get-trial" type="button" ${trialAvailable ? '' : 'disabled'}>${trialAvailable ? 'Get Free Trial' : 'You already used'}</button>
-    </div>
-    <p id="trial-message" class="login-error"></p>`;
+  const trialDurationLabel = trial.durationHours % 24 === 0 ? `${trial.durationHours / 24} day(s)` : `${trial.durationHours} hour(s)`;
+  const trialHtml = trial.enabled ? `
+    <div class="plan-card plan-card-trial">
+      <div class="plan-card-label">Free Trial</div>
+      <div class="plan-card-price">${trialDurationLabel}<span class="plan-card-unit"> &middot; one per device</span></div>
+      ${specsListHtml(trial.specs)}
+      <button class="btn-get-trial" id="btn-get-trial" type="button" ${trial.available ? '' : 'disabled'}>${trial.available ? 'Get Free Trial' : 'You already used'}</button>
+    </div>` : '';
+  const trialMessageHtml = trial.enabled ? '<p id="trial-message" class="login-error"></p>' : '';
 
   try {
     const res = await window.api.licenseGetPlans();
@@ -2779,17 +2789,16 @@ async function renderPlansScreen() {
 
   const plansHtml = licensePlansCache.length
     ? licensePlansCache.map((p, i) => `
-      <div class="plan-row">
-        <div class="plan-row-info">
-          <div class="pr-label">${p.label}</div>
-          <div class="pr-price">${p.price} ${p.currency} &middot; ${p.duration_days} day(s)</div>
-        </div>
+      <div class="plan-card">
+        <div class="plan-card-label">${p.label}</div>
+        <div class="plan-card-price">${p.price} ${p.currency}<span class="plan-card-unit"> &middot; ${p.duration_days} day(s)</span></div>
+        ${specsListHtml(p.specs)}
         <button class="btn-get-package" data-plan-index="${i}" type="button">Get Package</button>
       </div>
     `).join('')
-    : '<div class="license-subtitle">No plans available right now.</div>';
+    : (trialHtml ? '' : '<div class="license-subtitle">No plans available right now.</div>');
 
-  host.innerHTML = trialHtml + plansHtml;
+  host.innerHTML = `<div class="plans-grid">${trialHtml}${plansHtml}</div>${trialMessageHtml}`;
 
   host.querySelectorAll('.btn-get-package').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -2813,6 +2822,9 @@ async function renderPlansScreen() {
         } else if (res.reason === 'already-used') {
           trialBtn.textContent = 'You already used';
           if (msg) msg.textContent = 'This device has already used its free trial.';
+        } else if (res.reason === 'disabled') {
+          trialBtn.textContent = 'Not available';
+          if (msg) msg.textContent = 'Free trial is not being offered right now.';
         } else {
           trialBtn.disabled = false;
           trialBtn.textContent = 'Get Free Trial';

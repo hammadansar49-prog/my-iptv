@@ -306,37 +306,60 @@ ipcMain.handle('license:getSettings', async () => {
 // write attempt against that exact machineId is rejected once it's used —
 // this is enforced by Firebase itself, not by client-side logic.
 // ==============================================================
+// Admin-configurable (iptv/trial_config in RTDB — set from the theottdeals
+// "Free Trial" admin section): whether the trial is offered at all, how
+// long it lasts, and its marketing specs text. Defaults keep the original
+// 24h/enabled behavior if the admin has never touched this.
+async function getTrialConfig() {
+  try {
+    const data = await rtdbRequest('GET', '/iptv/trial_config');
+    return {
+      enabled: data && data.enabled === false ? false : true,
+      durationHours: (data && Number(data.duration_hours) > 0) ? Number(data.duration_hours) : 24,
+      specs: (data && data.specs) || ''
+    };
+  } catch {
+    return { enabled: true, durationHours: 24, specs: '' };
+  }
+}
+
 ipcMain.handle('trial:checkAvailability', async () => {
   try {
+    const config = await getTrialConfig();
+    if (!config.enabled) return { ok: true, available: false, enabled: false, specs: config.specs, durationHours: config.durationHours };
     const machineId = getMachineId();
     const data = await rtdbRequest('GET', `/iptv/trials/${machineId}`);
-    return { ok: true, available: !data };
+    return { ok: true, available: !data, enabled: true, specs: config.specs, durationHours: config.durationHours };
   } catch (err) {
-    return { ok: false, error: err.message || 'Network error', available: false };
+    return { ok: false, error: err.message || 'Network error', available: false, enabled: true, specs: '', durationHours: 24 };
   }
 });
 
 ipcMain.handle('trial:claim', async () => {
   try {
+    const config = await getTrialConfig();
+    if (!config.enabled) return { ok: true, valid: false, reason: 'disabled' };
+
     const machineId = getMachineId();
     const existing = await rtdbRequest('GET', `/iptv/trials/${machineId}`);
     if (existing) return { ok: true, valid: false, reason: 'already-used' };
 
     const now = Date.now();
-    const expiresAt = now + 24 * 60 * 60 * 1000;
+    const expiresAt = now + config.durationHours * 60 * 60 * 1000;
     // PUT only succeeds if the rule's `!data.exists()` still holds at write
     // time — if two claim attempts race, the second one's write is rejected
     // by Firebase even though its own earlier GET above saw nothing yet.
     await rtdbRequest('PUT', `/iptv/trials/${machineId}`, { claimed_at: now, expires_at: expiresAt });
 
+    const planLabel = `Free Trial (${config.durationHours}h)`;
     writeLicense({
       key: `TRIAL-${machineId.slice(0, 16).toUpperCase()}`,
-      plan: 'Free Trial (24h)',
+      plan: planLabel,
       expiresAt,
       lastVerifiedAt: now,
       isTrial: true
     });
-    return { ok: true, valid: true, plan: 'Free Trial (24h)', expiresAt };
+    return { ok: true, valid: true, plan: planLabel, expiresAt };
   } catch (err) {
     return { ok: false, valid: false, reason: 'network-error', error: err.message || 'Network error' };
   }
