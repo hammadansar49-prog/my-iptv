@@ -80,7 +80,17 @@ const I18N = {
     'playlists.playlistName': 'Playlist name (optional)',
     'playlists.m3uUrl': 'M3U URL',
     'playlists.credentialsNote': 'Credentials are stored only on this device.',
-    'playlists.addButton': '＋ Add Playlist'
+    'playlists.addButton': '＋ Add Playlist',
+    'settings.nav.updates': 'Updates',
+    'settings.nav.updates.blurb': 'Check for and install app updates.',
+    'updates.title': 'App updates',
+    'updates.currentVersion': 'Current version',
+    'updates.checkButton': 'Check for Updates',
+    'updates.checking': 'Checking',
+    'updates.upToDate': "You're up to date.",
+    'updates.available': 'A new version is available',
+    'updates.downloadButton': 'Download Update',
+    'updates.error': 'Could not check for updates — check your internet connection.'
   },
   ar: {
     'brand.name': 'MY IPTV',
@@ -145,7 +155,17 @@ const I18N = {
     'playlists.playlistName': 'اسم القائمة (اختياري)',
     'playlists.m3uUrl': 'رابط M3U',
     'playlists.credentialsNote': 'تُحفظ بيانات الاعتماد على هذا الجهاز فقط.',
-    'playlists.addButton': '+ إضافة قائمة'
+    'playlists.addButton': '+ إضافة قائمة',
+    'settings.nav.updates': 'التحديثات',
+    'settings.nav.updates.blurb': 'التحقق من تحديثات التطبيق وتثبيتها.',
+    'updates.title': 'تحديثات التطبيق',
+    'updates.currentVersion': 'الإصدار الحالي',
+    'updates.checkButton': 'التحقق من التحديثات',
+    'updates.checking': 'جارٍ التحقق',
+    'updates.upToDate': 'أنت تستخدم أحدث إصدار.',
+    'updates.available': 'يتوفر إصدار جديد',
+    'updates.downloadButton': 'تنزيل التحديث',
+    'updates.error': 'تعذّر التحقق من التحديثات — تحقق من اتصالك بالإنترنت.'
   },
   ru: {
     'brand.name': 'MY IPTV',
@@ -210,7 +230,17 @@ const I18N = {
     'playlists.playlistName': 'Название плейлиста (необязательно)',
     'playlists.m3uUrl': 'Ссылка M3U',
     'playlists.credentialsNote': 'Данные для входа хранятся только на этом устройстве.',
-    'playlists.addButton': '+ Добавить плейлист'
+    'playlists.addButton': '+ Добавить плейлист',
+    'settings.nav.updates': 'Обновления',
+    'settings.nav.updates.blurb': 'Проверка и установка обновлений приложения.',
+    'updates.title': 'Обновления приложения',
+    'updates.currentVersion': 'Текущая версия',
+    'updates.checkButton': 'Проверить обновления',
+    'updates.checking': 'Проверка',
+    'updates.upToDate': 'У вас последняя версия.',
+    'updates.available': 'Доступна новая версия',
+    'updates.downloadButton': 'Скачать обновление',
+    'updates.error': 'Не удалось проверить обновления — проверьте подключение к интернету.'
   },
   ur: {
     'brand.name': 'MY IPTV',
@@ -275,7 +305,17 @@ const I18N = {
     'playlists.playlistName': 'پلے لسٹ کا نام (اختیاری)',
     'playlists.m3uUrl': 'M3U لنک',
     'playlists.credentialsNote': 'معلومات صرف اسی ڈیوائس پر محفوظ ہوتی ہیں۔',
-    'playlists.addButton': '+ پلے لسٹ شامل کریں'
+    'playlists.addButton': '+ پلے لسٹ شامل کریں',
+    'settings.nav.updates': 'اپڈیٹس',
+    'settings.nav.updates.blurb': 'ایپ اپڈیٹس چیک اور انسٹال کریں۔',
+    'updates.title': 'ایپ اپڈیٹس',
+    'updates.currentVersion': 'موجودہ ورژن',
+    'updates.checkButton': 'اپڈیٹس چیک کریں',
+    'updates.checking': 'چیک ہو رہا ہے',
+    'updates.upToDate': 'آپ کے پاس تازہ ترین ورژن ہے۔',
+    'updates.available': 'ایک نیا ورژن دستیاب ہے',
+    'updates.downloadButton': 'اپڈیٹ ڈاؤن لوڈ کریں',
+    'updates.error': 'اپڈیٹس چیک نہیں ہو سکیں — اپنا انٹرنیٹ کنکشن چیک کریں۔'
   },
   es: {
     'brand.name': 'MY IPTV',
@@ -340,7 +380,17 @@ const I18N = {
     'playlists.playlistName': 'Nombre de la lista (opcional)',
     'playlists.m3uUrl': 'URL M3U',
     'playlists.credentialsNote': 'Las credenciales se guardan solo en este dispositivo.',
-    'playlists.addButton': '+ Agregar lista'
+    'playlists.addButton': '+ Agregar lista',
+    'settings.nav.updates': 'Actualizaciones',
+    'settings.nav.updates.blurb': 'Busca e instala actualizaciones de la app.',
+    'updates.title': 'Actualizaciones de la app',
+    'updates.currentVersion': 'Versión actual',
+    'updates.checkButton': 'Buscar actualizaciones',
+    'updates.checking': 'Buscando',
+    'updates.upToDate': 'Estás al día.',
+    'updates.available': 'Hay una nueva versión disponible',
+    'updates.downloadButton': 'Descargar actualización',
+    'updates.error': 'No se pudieron buscar actualizaciones — revisa tu conexión a internet.'
   }
 };
 

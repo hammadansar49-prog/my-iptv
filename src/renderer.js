@@ -986,7 +986,8 @@ const SETTINGS_SECTIONS = [
   { id: 'appearance', label: 'settings.nav.appearance', icon: '🎨', blurb: 'settings.nav.appearance.blurb' },
   { id: 'backup', label: 'settings.nav.backup', icon: '↥', blurb: 'settings.nav.backup.blurb' },
   { id: 'troubleshooting', label: 'settings.nav.troubleshooting', icon: '🛟', blurb: 'settings.nav.troubleshooting.blurb' },
-  { id: 'about', label: 'settings.nav.about', icon: 'ⓘ', blurb: 'settings.nav.about.blurb' }
+  { id: 'about', label: 'settings.nav.about', icon: 'ⓘ', blurb: 'settings.nav.about.blurb' },
+  { id: 'updates', label: 'settings.nav.updates', icon: '🔄', blurb: 'settings.nav.updates.blurb' }
 ];
 
 function openSettings(sectionId = 'playlists') {
@@ -1044,8 +1045,71 @@ function openSettings(sectionId = 'playlists') {
     appearance: renderAppearanceSettings,
     backup: renderBackupSettings,
     troubleshooting: renderTroubleshootingSettings,
-    about: renderAboutSettings
+    about: renderAboutSettings,
+    updates: renderUpdatesSettings
   })[meta.id](pane);
+}
+
+// ---- Check for updates ----
+async function renderUpdatesSettings(pane) {
+  const currentVersion = await window.api.getAppVersion().catch(() => '-');
+  pane.innerHTML = settingsCard(t('updates.title'), `
+    <div class="settings-row">
+      <div class="settings-row-text">
+        <div class="sr-label">${t('updates.currentVersion')}: v${currentVersion}</div>
+        <div class="sr-help" id="updates-status">${t('updates.upToDate')}</div>
+      </div>
+      <div class="settings-row-control">
+        <button class="btn-primary" id="updates-check-btn">${t('updates.checkButton')}</button>
+      </div>
+    </div>
+    <div id="updates-download-row" class="settings-row" hidden>
+      <div class="settings-row-text">
+        <div class="sr-label" id="updates-new-version"></div>
+        <div class="sr-help" id="updates-notes"></div>
+      </div>
+      <div class="settings-row-control">
+        <button class="btn-primary" id="updates-download-btn">${t('updates.downloadButton')}</button>
+      </div>
+    </div>`);
+
+  const checkBtn = $('#updates-check-btn');
+  const status = $('#updates-status');
+  const downloadRow = $('#updates-download-row');
+
+  checkBtn.addEventListener('click', async () => {
+    checkBtn.disabled = true;
+    downloadRow.hidden = true;
+    let dots = 0;
+    status.textContent = t('updates.checking');
+    // A small animated ellipsis so "Checking..." doesn't look frozen while
+    // the request is in flight — purely cosmetic, has no bearing on the
+    // actual result once it comes back.
+    const dotsTimer = setInterval(() => {
+      dots = (dots + 1) % 4;
+      status.textContent = t('updates.checking') + '.'.repeat(dots);
+    }, 350);
+    try {
+      const info = await window.api.checkForUpdate();
+      clearInterval(dotsTimer);
+      if (info && info.available) {
+        status.textContent = t('updates.available');
+        $('#updates-new-version').textContent = `v${info.latestVersion}`;
+        $('#updates-notes').textContent = info.notes || '';
+        downloadRow.hidden = false;
+        $('#updates-download-btn').onclick = () => {
+          if (info.downloadUrl) window.api.openDownloadUrl(info.downloadUrl);
+        };
+      } else {
+        status.textContent = t('updates.upToDate');
+      }
+    } catch {
+      clearInterval(dotsTimer);
+      status.textContent = t('updates.error');
+    } finally {
+      checkBtn.disabled = false;
+    }
+  });
 }
 
 function settingsCard(title, bodyHtml) {
