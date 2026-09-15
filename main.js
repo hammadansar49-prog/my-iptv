@@ -105,6 +105,7 @@ function createWindow() {
 app.whenReady().then(async () => {
   await startProxyServer();
   createWindow();
+  startIptvLiveSync();
   revalidateLicenseInBackground();
   const cachedLicense = readLicense();
   if (cachedLicense && cachedLicense.key && !cachedLicense.isTrial) startLicenseStream(cachedLicense.key);
@@ -258,6 +259,120 @@ function rtdbRequest(method, path, body, timeoutMs = 15000) {
   });
 }
 
+// ==============================================================
+// Live sync for everything on the license-gate/plans screens (pricing
+// plans, the free-trial config, the WhatsApp number, the in-app
+// announcement, the published update) — kept in an in-memory cache that's
+// populated once at startup and refreshed the instant any of it changes on
+// the server, so the renderer never has to wait on a network round trip
+// (no more "Loading plans..." — see:) it just reads whatever's already in
+// this cache. Uses the same RTDB REST "Accept: text/event-stream" trick as
+// the per-key license stream (see startLicenseStream) — on any event for a
+// path, the simplest correct thing is to just re-GET that whole path rather
+// than try to patch the local copy from the event's own (possibly partial)
+// payload.
+// ==============================================================
+function subscribeRtdbSSE(path, onEvent) {
+  let req = null;
+  let retryTimer = null;
+  function scheduleRetry() {
+    if (retryTimer) return;
+    retryTimer = setTimeout(() => { retryTimer = null; connect(); }, 5000);
+  }
+  function connect() {
+    const u = new URL(`${IPTV_RTDB_URL}${path}.json`);
+    const lib = u.protocol === 'https:' ? https : http;
+    let buffer = '';
+    req = lib.get(u, { headers: { Accept: 'text/event-stream' } }, (res) => {
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        buffer += chunk;
+        let idx;
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+          const rawEvent = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          const eventMatch = /^event: (.+)$/m.exec(rawEvent);
+          const dataMatch = /^data: (.+)$/m.exec(rawEvent);
+          if (!eventMatch || !dataMatch) continue;
+          if (eventMatch[1] !== 'put' && eventMatch[1] !== 'patch') continue;
+          try { onEvent(); } catch { /* onEvent itself reports its own errors */ }
+        }
+      });
+      res.on('end', scheduleRetry);
+      res.on('error', scheduleRetry);
+    });
+    req.on('error', scheduleRetry);
+  }
+  connect();
+}
+
+const iptvLiveCache = {
+  plans: [],
+  settings: {},
+  trialConfig: { enabled: true, durationHours: 24, specs: '' },
+  announcement: null,
+  update: null // { version, downloadUrl, notes, forceUpdate } — raw admin fields, compared to app.getVersion() on read
+};
+
+function pushIptvCacheToRenderer() {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('iptv:cacheUpdated');
+}
+
+async function refreshIptvPlans() {
+  try {
+    const data = await rtdbRequest('GET', '/iptv/plans');
+    iptvLiveCache.plans = Object.values(data || {}).filter((p) => p && p.enabled);
+    pushIptvCacheToRenderer();
+  } catch { /* keep the last known cache */ }
+}
+
+async function refreshIptvSettings() {
+  try {
+    iptvLiveCache.settings = (await rtdbRequest('GET', '/iptv/settings')) || {};
+    pushIptvCacheToRenderer();
+  } catch { /* keep the last known cache */ }
+}
+
+async function refreshTrialConfig() {
+  try {
+    const data = await rtdbRequest('GET', '/iptv/trial_config');
+    iptvLiveCache.trialConfig = {
+      enabled: data && data.enabled === false ? false : true,
+      durationHours: (data && Number(data.duration_hours) > 0) ? Number(data.duration_hours) : 24,
+      specs: (data && data.specs) || ''
+    };
+    pushIptvCacheToRenderer();
+  } catch { /* keep the last known cache */ }
+}
+
+async function refreshAnnouncement() {
+  try {
+    const data = await rtdbRequest('GET', '/iptv/announcement');
+    iptvLiveCache.announcement = (data && data.text && !(data.expires_at && data.expires_at < Date.now())) ? data : null;
+    pushIptvCacheToRenderer();
+  } catch { /* keep the last known cache */ }
+}
+
+async function refreshUpdateInfo() {
+  try {
+    iptvLiveCache.update = await rtdbRequest('GET', '/iptv/update');
+    pushIptvCacheToRenderer();
+  } catch { /* keep the last known cache */ }
+}
+
+function startIptvLiveSync() {
+  subscribeRtdbSSE('/iptv/plans', refreshIptvPlans);
+  subscribeRtdbSSE('/iptv/settings', refreshIptvSettings);
+  subscribeRtdbSSE('/iptv/trial_config', refreshTrialConfig);
+  subscribeRtdbSSE('/iptv/announcement', refreshAnnouncement);
+  subscribeRtdbSSE('/iptv/update', refreshUpdateInfo);
+  refreshIptvPlans();
+  refreshIptvSettings();
+  refreshTrialConfig();
+  refreshAnnouncement();
+  refreshUpdateInfo();
+}
+
 function readLicense() {
   const store = readStore();
   return (store && store.license) || null;
@@ -277,24 +392,9 @@ function localLicenseStatus() {
 
 ipcMain.handle('license:getStatus', () => localLicenseStatus());
 
-ipcMain.handle('license:getPlans', async () => {
-  try {
-    const data = await rtdbRequest('GET', '/iptv/plans');
-    const plans = Object.values(data || {}).filter((p) => p && p.enabled);
-    return { ok: true, plans };
-  } catch (err) {
-    return { ok: false, error: err.message || 'Network error', plans: [] };
-  }
-});
+ipcMain.handle('license:getPlans', () => ({ ok: true, plans: iptvLiveCache.plans }));
 
-ipcMain.handle('license:getSettings', async () => {
-  try {
-    const data = await rtdbRequest('GET', '/iptv/settings');
-    return { ok: true, settings: data || {} };
-  } catch (err) {
-    return { ok: false, error: err.message || 'Network error', settings: {} };
-  }
-});
+ipcMain.handle('license:getSettings', () => ({ ok: true, settings: iptvLiveCache.settings }));
 
 // ==============================================================
 // Free trial: exactly one 24h trial per device, enforced server-side at
@@ -310,17 +410,8 @@ ipcMain.handle('license:getSettings', async () => {
 // "Free Trial" admin section): whether the trial is offered at all, how
 // long it lasts, and its marketing specs text. Defaults keep the original
 // 24h/enabled behavior if the admin has never touched this.
-async function getTrialConfig() {
-  try {
-    const data = await rtdbRequest('GET', '/iptv/trial_config');
-    return {
-      enabled: data && data.enabled === false ? false : true,
-      durationHours: (data && Number(data.duration_hours) > 0) ? Number(data.duration_hours) : 24,
-      specs: (data && data.specs) || ''
-    };
-  } catch {
-    return { enabled: true, durationHours: 24, specs: '' };
-  }
+function getTrialConfig() {
+  return iptvLiveCache.trialConfig;
 }
 
 ipcMain.handle('trial:checkAvailability', async () => {
@@ -391,16 +482,7 @@ ipcMain.handle('shell:openDownloadUrl', (_e, url) => {
 // createdAt) — see armAnnouncementCheck in src/renderer.js for the dismiss
 // bookkeeping.
 // ==============================================================
-ipcMain.handle('announcement:get', async () => {
-  try {
-    const data = await rtdbRequest('GET', '/iptv/announcement');
-    if (!data || !data.text) return { ok: true, announcement: null };
-    if (data.expires_at && data.expires_at < Date.now()) return { ok: true, announcement: null };
-    return { ok: true, announcement: data };
-  } catch (err) {
-    return { ok: false, error: err.message || 'Network error', announcement: null };
-  }
-});
+ipcMain.handle('announcement:get', () => ({ ok: true, announcement: iptvLiveCache.announcement }));
 
 // ==============================================================
 // Update check. Admin publishes the latest version + download link (and an
@@ -419,9 +501,9 @@ function compareVersions(a, b) {
   return 0;
 }
 
-ipcMain.handle('update:check', async () => {
+ipcMain.handle('update:check', () => {
   try {
-    const data = await rtdbRequest('GET', '/iptv/update');
+    const data = iptvLiveCache.update;
     const currentVersion = app.getVersion();
     if (!data || !data.version) return { ok: true, available: false, currentVersion };
     const available = compareVersions(data.version, currentVersion) > 0;

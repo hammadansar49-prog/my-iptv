@@ -44,5 +44,10 @@ contextBridge.exposeInMainWorld('api', {
     const handler = () => cb();
     ipcRenderer.on('license:invalidated', handler);
     return () => ipcRenderer.removeListener('license:invalidated', handler);
+  },
+  onIptvCacheUpdated: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('iptv:cacheUpdated', handler);
+    return () => ipcRenderer.removeListener('iptv:cacheUpdated', handler);
   }
 });

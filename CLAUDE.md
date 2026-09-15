@@ -119,10 +119,18 @@ the pattern it copies) — not a separate URL to remember or maintain.
 `src/styles.css`): a `view-license` screen (same `showView()` pattern as every other screen) blocks
 `boot()` from running at all until `license:getStatus` reports a valid, unexpired key.
 
-**Pricing is live, not hardcoded**: the license-gate screen's `license:getPlans` reads
-`iptv/plans` straight from RTDB, so editing a plan's price/label/duration in the theottdeals admin
-panel is reflected in the app immediately on next screen load — no rebuild needed. Don't hardcode
-plan pricing back into `index.html`/`renderer.js`.
+**Pricing is live and instant, not hardcoded, no "Loading..." wait**: `main.js` keeps an in-memory
+cache (`iptvLiveCache`) of plans/settings/trial-config/announcement/update, populated at app
+startup and kept current for the rest of the session by `subscribeRtdbSSE()` — a live connection to
+RTDB's REST API (`Accept: text/event-stream`) per path, the same trick `startLicenseStream` already
+used for per-key revocation. `license:getPlans`/`license:getSettings`/`announcement:get`/
+`update:check` all just read this cache synchronously now — no network round trip on the request
+itself, which is what removed the "Loading plans..." flash on the plans screen. `armIptvLiveUpdates()`
+in `src/renderer.js` re-renders the plans screen (if it's the one currently open) the instant
+`main.js` pushes a cache-changed event, so an admin edit shows up while the screen is still open,
+not just next time it's opened. Don't hardcode plan pricing back into `index.html`/`renderer.js`,
+and don't reintroduce a direct `rtdbRequest` call inside these four IPC handlers — extend
+`iptvLiveCache`/`subscribeRtdbSSE` instead, or the "instant, no loading" property breaks again.
 
 **Key lifecycle**: a key's expiry clock starts on first successful `verify` call (not at
 generation) — unsold keys don't expire sitting in inventory. Once activated, a key is bound to the

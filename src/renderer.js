@@ -2760,7 +2760,12 @@ function specsListHtml(specs) {
 async function renderPlansScreen() {
   const host = $('#plans-list');
   if (!host) return;
-  host.innerHTML = '<div class="license-subtitle">Loading plans...</div>';
+  // No "Loading..." placeholder: main.js answers license:getPlans /
+  // checkTrialAvailability straight from its own in-memory cache (kept live
+  // via an RTDB event stream, see startIptvLiveSync in main.js), so this is
+  // effectively instant — there's nothing worth showing a spinner for.
+  // If the plans screen is already open when the admin changes something,
+  // armIptvLiveUpdates() below re-runs this function again automatically.
 
   // Free trial availability/duration/specs and whether it's offered at all
   // are decided server-side (see trial:checkAvailability in main.js) — kept
@@ -3159,11 +3164,28 @@ async function boot() {
 
 // Re-checked every 30 minutes while the app is open — an admin publishing a
 // new announcement or update doesn't require the user to restart the app.
+// This is now mostly a safety net: armIptvLiveUpdates (below) reacts to the
+// same things instantly via a live push from main.js.
 function armAnnouncementAndUpdateWatch() {
   setInterval(() => {
     checkAnnouncement();
     checkForUpdate();
   }, 30 * 60 * 1000);
+}
+
+// Pushed from main.js the instant plans/settings/trial-config/announcement/
+// update changes on the server (it keeps its own live RTDB stream open —
+// see startIptvLiveSync in main.js). If the plans screen happens to be open
+// right now, this is what makes an admin edit show up on it in real time
+// with the screen still open, not just "correct next time you open it".
+function armIptvLiveUpdates() {
+  window.api.onIptvCacheUpdated(() => {
+    if (document.getElementById('view-plans')?.classList.contains('active')) {
+      renderPlansScreen();
+    }
+    checkAnnouncement();
+    checkForUpdate();
+  });
 }
 
 // Pushed from the main process the instant its live RTDB stream sees this
@@ -3187,6 +3209,7 @@ async function startup() {
   initLicenseGate();
   armLicenseInvalidationPush();
   armLicenseWatch();
+  armIptvLiveUpdates();
   let status;
   try { status = await window.api.licenseGetStatus(); } catch { status = { valid: false }; }
   if (!status.valid) {
