@@ -51,6 +51,10 @@ input { font-family: inherit; }
 .plan-row-info .pr-price { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
 .btn-get-package { flex-shrink: 0; padding: 9px 16px; background: linear-gradient(135deg, #22c55e, #16a34a); border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 12px; white-space: nowrap; }
 .btn-get-package:hover { filter: brightness(1.08); }
+.plan-row-trial { border-color: var(--accent); background: linear-gradient(135deg, rgba(139,92,246,.12), rgba(168,85,247,.06)); }
+.btn-get-trial { flex-shrink: 0; padding: 9px 16px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 12px; white-space: nowrap; }
+.btn-get-trial:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-get-trial:disabled { background: var(--bg-3); color: var(--text-dim); cursor: not-allowed; }
 
 /* ---------- LOGIN ---------- */
 #view-login.active { align-items: center; justify-content: center; background: radial-gradient(circle at 30% 20%, #2a2050, #14111f 70%); }

@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('api', {
   licenseGetSettings: () => ipcRenderer.invoke('license:getSettings'),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   openDownloadUrl: (url) => ipcRenderer.invoke('shell:openDownloadUrl', url),
+  checkTrialAvailability: () => ipcRenderer.invoke('trial:checkAvailability'),
+  claimTrial: () => ipcRenderer.invoke('trial:claim'),
   getAnnouncement: () => ipcRenderer.invoke('announcement:get'),
   checkForUpdate: () => ipcRenderer.invoke('update:check'),
   onLicenseInvalidated: (cb) => {

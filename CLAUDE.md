@@ -150,6 +150,22 @@ unlocks the app straight into its normal login flow (existing `boot()` call). Ac
 payment/checkout is still not built — this WhatsApp handoff is the whole "purchase" step for now.
 Also not built: Android app licensing.
 
+**Free trial (24h, one per device)**: a "Get Free Trial" button on the plans screen
+(`renderPlansScreen()` in `src/renderer.js`) calls `trial:claim` (`main.js`). This is
+**deliberately not** the same mechanism as a purchased key — there's no row in `iptv/keys` for it
+at all. Instead, `iptv/trials/{machineId}` is a create-once record: the RTDB rule
+(`iptv/trials/$machineId`, `.write: "auth != null || !data.exists()"`) lets the app write it
+exactly once per device and never again, so deleting/reinstalling the app (which wipes
+`store.json`, where the trial's expiry is cached locally) does **not** grant a second trial — the
+server-side record is what's actually authoritative, keyed to `getMachineId()`, which now also
+folds in a NIC's MAC address specifically because that (unlike anything the app stores) survives a
+reinstall. A license object with `isTrial: true` skips the normal per-key RTDB recheck/SSE-stream
+machinery entirely (there's no `iptv/keys` row to check) — its own fixed `expiresAt` from claim time
+is the whole story locally, which is fine since a trial isn't meant to be extended or revoked.
+**Note**: changing `getMachineId()`'s formula (as happened when the MAC address was added) changes
+every existing key's device-binding too — anyone already activated will see `wrong-device` on their
+next check. Don't touch that function casually.
+
 ## Before pushing changes to GitHub
 This repo has `node_modules/`, `release/`, `vendor/` (bundled ffmpeg) and `*.log` gitignored — they
 should never show up in `git status` as untracked-and-about-to-be-added. If they do, something

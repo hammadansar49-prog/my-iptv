@@ -2677,29 +2677,80 @@ async function renderPlansScreen() {
   const host = $('#plans-list');
   if (!host) return;
   host.innerHTML = '<div class="license-subtitle">Loading plans...</div>';
+
+  // Free trial availability is decided server-side (see trial:checkAvailability
+  // in main.js) — it's keyed to this device's hardware fingerprint, not to
+  // anything stored locally, specifically so reinstalling the app doesn't
+  // grant a second one.
+  let trialAvailable = false;
+  try {
+    const trialRes = await window.api.checkTrialAvailability();
+    trialAvailable = !!(trialRes && trialRes.available);
+  } catch { trialAvailable = false; }
+
+  const trialHtml = `
+    <div class="plan-row plan-row-trial">
+      <div class="plan-row-info">
+        <div class="pr-label">Free Trial</div>
+        <div class="pr-price">24 hours &middot; one per device</div>
+      </div>
+      <button class="btn-get-trial" id="btn-get-trial" type="button" ${trialAvailable ? '' : 'disabled'}>${trialAvailable ? 'Get Free Trial' : 'You already used'}</button>
+    </div>
+    <p id="trial-message" class="login-error"></p>`;
+
   try {
     const res = await window.api.licenseGetPlans();
     licensePlansCache = (res && res.plans) || [];
   } catch { licensePlansCache = []; }
-  if (!licensePlansCache.length) {
-    host.innerHTML = '<div class="license-subtitle">No plans available right now.</div>';
-    return;
-  }
-  host.innerHTML = licensePlansCache.map((p, i) => `
-    <div class="plan-row">
-      <div class="plan-row-info">
-        <div class="pr-label">${p.label}</div>
-        <div class="pr-price">${p.price} ${p.currency} &middot; ${p.duration_days} day(s)</div>
+
+  const plansHtml = licensePlansCache.length
+    ? licensePlansCache.map((p, i) => `
+      <div class="plan-row">
+        <div class="plan-row-info">
+          <div class="pr-label">${p.label}</div>
+          <div class="pr-price">${p.price} ${p.currency} &middot; ${p.duration_days} day(s)</div>
+        </div>
+        <button class="btn-get-package" data-plan-index="${i}" type="button">Get Package</button>
       </div>
-      <button class="btn-get-package" data-plan-index="${i}" type="button">Get Package</button>
-    </div>
-  `).join('');
+    `).join('')
+    : '<div class="license-subtitle">No plans available right now.</div>';
+
+  host.innerHTML = trialHtml + plansHtml;
+
   host.querySelectorAll('.btn-get-package').forEach((btn) => {
     btn.addEventListener('click', () => {
       const plan = licensePlansCache[Number(btn.dataset.planIndex)];
       if (plan) openPackageOnWhatsApp(plan);
     });
   });
+
+  const trialBtn = $('#btn-get-trial');
+  if (trialBtn && !trialBtn.disabled) {
+    trialBtn.addEventListener('click', async () => {
+      trialBtn.disabled = true;
+      trialBtn.textContent = 'Activating...';
+      const msg = $('#trial-message');
+      if (msg) msg.textContent = '';
+      try {
+        const res = await window.api.claimTrial();
+        if (res.valid) {
+          await updateProBadge();
+          boot();
+        } else if (res.reason === 'already-used') {
+          trialBtn.textContent = 'You already used';
+          if (msg) msg.textContent = 'This device has already used its free trial.';
+        } else {
+          trialBtn.disabled = false;
+          trialBtn.textContent = 'Get Free Trial';
+          if (msg) msg.textContent = 'Could not activate trial — check your internet connection.';
+        }
+      } catch {
+        trialBtn.disabled = false;
+        trialBtn.textContent = 'Get Free Trial';
+        if (msg) msg.textContent = 'Could not activate trial — check your internet connection.';
+      }
+    });
+  }
 }
 
 function licenseSetError(msg) {

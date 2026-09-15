@@ -107,7 +107,7 @@ app.whenReady().then(async () => {
   createWindow();
   revalidateLicenseInBackground();
   const cachedLicense = readLicense();
-  if (cachedLicense && cachedLicense.key) startLicenseStream(cachedLicense.key);
+  if (cachedLicense && cachedLicense.key && !cachedLicense.isTrial) startLicenseStream(cachedLicense.key);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -207,7 +207,21 @@ ipcMain.handle('net:getText', async (_e, url) => {
 const IPTV_RTDB_URL = process.env.MYIPTV_RTDB_URL || 'https://theottdeals-reviews-default-rtdb.firebaseio.com';
 
 function getMachineId() {
-  const raw = [os.hostname(), os.platform(), os.arch(), (os.cpus()[0] || {}).model || '', os.userInfo().username]
+  // Includes a NIC's MAC address specifically because it (unlike anything
+  // this app itself stores) survives an uninstall/reinstall of the app —
+  // this identifier is what the free-trial one-per-device rule is pinned
+  // to, so it has to keep pointing at the same hash after a fresh install.
+  let mac = '';
+  try {
+    const nets = os.networkInterfaces();
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name]) {
+        if (!net.internal && net.mac && net.mac !== '00:00:00:00:00:00') { mac = net.mac; break; }
+      }
+      if (mac) break;
+    }
+  } catch { /* fall back to the rest of the fingerprint below */ }
+  const raw = [os.hostname(), os.platform(), os.arch(), (os.cpus()[0] || {}).model || '', os.userInfo().username, mac]
     .join('|');
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
@@ -279,6 +293,52 @@ ipcMain.handle('license:getSettings', async () => {
     return { ok: true, settings: data || {} };
   } catch (err) {
     return { ok: false, error: err.message || 'Network error', settings: {} };
+  }
+});
+
+// ==============================================================
+// Free trial: exactly one 24h trial per device, enforced server-side at
+// iptv/trials/{machineId} — not by anything stored locally, since the
+// whole point is that deleting/reinstalling the app (which wipes
+// store.json) must NOT grant a second trial. The RTDB rule for this path
+// only allows a create when nothing exists there yet
+// (".write": "auth != null || !data.exists()"), so even a direct/tampered
+// write attempt against that exact machineId is rejected once it's used —
+// this is enforced by Firebase itself, not by client-side logic.
+// ==============================================================
+ipcMain.handle('trial:checkAvailability', async () => {
+  try {
+    const machineId = getMachineId();
+    const data = await rtdbRequest('GET', `/iptv/trials/${machineId}`);
+    return { ok: true, available: !data };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Network error', available: false };
+  }
+});
+
+ipcMain.handle('trial:claim', async () => {
+  try {
+    const machineId = getMachineId();
+    const existing = await rtdbRequest('GET', `/iptv/trials/${machineId}`);
+    if (existing) return { ok: true, valid: false, reason: 'already-used' };
+
+    const now = Date.now();
+    const expiresAt = now + 24 * 60 * 60 * 1000;
+    // PUT only succeeds if the rule's `!data.exists()` still holds at write
+    // time — if two claim attempts race, the second one's write is rejected
+    // by Firebase even though its own earlier GET above saw nothing yet.
+    await rtdbRequest('PUT', `/iptv/trials/${machineId}`, { claimed_at: now, expires_at: expiresAt });
+
+    writeLicense({
+      key: `TRIAL-${machineId.slice(0, 16).toUpperCase()}`,
+      plan: 'Free Trial (24h)',
+      expiresAt,
+      lastVerifiedAt: now,
+      isTrial: true
+    });
+    return { ok: true, valid: true, plan: 'Free Trial (24h)', expiresAt };
+  } catch (err) {
+    return { ok: false, valid: false, reason: 'network-error', error: err.message || 'Network error' };
   }
 });
 
@@ -527,6 +587,9 @@ function startLicenseStream(key) {
 ipcMain.handle('license:recheckNow', async () => {
   const lic = readLicense();
   if (!lic || !lic.key) return localLicenseStatus();
+  // A trial isn't a row in iptv/keys, so there's nothing to re-check there —
+  // its own fixed expiry (set once, at claim time) is the whole story.
+  if (lic.isTrial) return localLicenseStatus();
   try {
     const result = await checkKeyStatusOnly(lic.key);
     if (result.valid) {
@@ -545,7 +608,7 @@ ipcMain.handle('license:recheckNow', async () => {
 // Never blocks — if offline, the last locally-cached expiry keeps working.
 async function revalidateLicenseInBackground() {
   const lic = readLicense();
-  if (!lic || !lic.key) return;
+  if (!lic || !lic.key || lic.isTrial) return;
   const dayMs = 24 * 60 * 60 * 1000;
   if (lic.lastVerifiedAt && Date.now() - lic.lastVerifiedAt < dayMs) return;
   try {
