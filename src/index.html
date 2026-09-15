@@ -14,14 +14,14 @@
       <div class="brand-mark"><img src="../assets/icon.ico" alt="MY IPTV" /></div>
       <div class="brand-name">MY IPTV</div>
     </div>
-    <div class="license-subtitle">Enter your license key to continue</div>
+    <div class="license-subtitle" data-i18n="license.title">Enter your license key to continue</div>
 
-    <button id="btn-see-plans" class="btn-secondary" type="button">See Plans</button>
+    <button id="btn-see-plans" class="btn-secondary" type="button" data-i18n="license.seePlans">See Plans</button>
 
-    <label>License key</label>
+    <label data-i18n="license.keyLabel">License key</label>
     <input id="license-key-input" type="text" placeholder="MYIPTV-XXXX-XXXX-XXXX" autocomplete="off" />
     <div id="license-error" class="login-error"></div>
-    <button id="btn-license-verify" class="btn-primary">Verify</button>
+    <button id="btn-license-verify" class="btn-primary" data-i18n="license.verify">Verify</button>
   </div>
 </div>
 
@@ -32,11 +32,11 @@
       <div class="brand-mark"><img src="../assets/icon.ico" alt="MY IPTV" /></div>
       <div class="brand-name">MY IPTV</div>
     </div>
-    <div class="license-subtitle">Choose a package</div>
+    <div class="license-subtitle" data-i18n="plans.title">Choose a package</div>
 
     <div id="plans-list" class="plans-list"></div>
 
-    <button id="btn-plans-back" class="btn-secondary" type="button">Back</button>
+    <button id="btn-plans-back" class="btn-secondary" type="button" data-i18n="plans.back">Back</button>
   </div>
 </div>
 
@@ -45,7 +45,7 @@
   <div class="splash-card">
     <div class="splash-logo"><img src="../assets/icon.ico" alt="MY IPTV" /></div>
     <div class="splash-title">MY IPTV</div>
-    <div class="splash-subtitle" id="splash-subtitle">Starting MY IPTV</div>
+    <div class="splash-subtitle" id="splash-subtitle" data-i18n="splash.starting">Starting MY IPTV</div>
     <div class="splash-progress-wrap">
       <div class="splash-progress-bar" id="splash-progress-bar"></div>
     </div>
@@ -65,28 +65,28 @@
     </div>
 
     <div class="login-tabs">
-      <button class="ltab active" data-tab="xtream">Xtream Codes</button>
-      <button class="ltab" data-tab="m3u">M3U URL</button>
+      <button class="ltab active" data-tab="xtream" data-i18n="login.xtream">Xtream Codes</button>
+      <button class="ltab" data-tab="m3u" data-i18n="login.m3u">M3U URL</button>
     </div>
 
     <div id="tab-xtream" class="ltab-panel active">
-      <label>Server URL</label>
+      <label data-i18n="login.serverUrl">Server URL</label>
       <input id="x-url" type="text" placeholder="http://server.example.com:8080" />
-      <label>Username</label>
-      <input id="x-user" type="text" placeholder="Username" />
-      <label>Password</label>
-      <input id="x-pass" type="password" placeholder="Password" />
+      <label data-i18n="login.username">Username</label>
+      <input id="x-user" type="text" data-i18n-placeholder="login.username" placeholder="Username" />
+      <label data-i18n="login.password">Password</label>
+      <input id="x-pass" type="password" data-i18n-placeholder="login.password" placeholder="Password" />
     </div>
 
     <div id="tab-m3u" class="ltab-panel">
-      <label>Playlist Name</label>
+      <label data-i18n="login.playlistName">Playlist Name</label>
       <input id="m-name" type="text" placeholder="My Playlist" />
-      <label>M3U URL</label>
+      <label data-i18n="login.m3uUrl">M3U URL</label>
       <input id="m-url" type="text" placeholder="http://server.example.com/playlist.m3u" />
     </div>
 
     <div id="login-error" class="login-error"></div>
-    <button id="btn-login" class="btn-primary">Login</button>
+    <button id="btn-login" class="btn-primary" data-i18n="login.button">Login</button>
 
     <div class="saved-accounts" id="saved-accounts"></div>
   </div>
@@ -104,9 +104,9 @@
       </div>
     </div>
     <nav class="tb-tabs">
-      <button class="tb-tab active" data-section="live"><span class="ic">📺</span> Live TV</button>
-      <button class="tb-tab" data-section="movies"><span class="ic">🎬</span> Movies</button>
-      <button class="tb-tab" data-section="series"><span class="ic">📀</span> Series</button>
+      <button class="tb-tab active" data-section="live"><span class="ic">📺</span> <span data-i18n="topbar.live">Live TV</span></button>
+      <button class="tb-tab" data-section="movies"><span class="ic">🎬</span> <span data-i18n="topbar.movies">Movies</span></button>
+      <button class="tb-tab" data-section="series"><span class="ic">📀</span> <span data-i18n="topbar.series">Series</span></button>
     </nav>
     <div class="tb-right">
       <div class="playlist-switch" id="playlist-switch">
@@ -124,26 +124,26 @@
           <button class="pl-menu-add" id="pl-menu-add">＋ Add New Playlist</button>
         </div>
       </div>
-      <button class="icon-btn tb-downloads-btn" id="tb-downloads" title="Downloads">
+      <button class="icon-btn tb-downloads-btn" id="tb-downloads" title="Downloads" data-i18n-title="topbar.downloads">
         ⬇<span class="tb-downloads-dot" id="tb-downloads-dot" hidden></span>
       </button>
-      <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
-      <button class="icon-btn" id="btn-logout" title="Switch account">🚪</button>
+      <button class="icon-btn" id="btn-settings" title="Settings" data-i18n-title="topbar.settings">⚙️</button>
+      <button class="icon-btn" id="btn-logout" title="Switch account" data-i18n-title="topbar.logout">🚪</button>
     </div>
   </header>
 
   <div class="body-grid">
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-top">
-        <div class="sb-quick" id="sb-continue">⏱ Continue Watching <span id="cw-count">0</span></div>
-        <div class="sb-quick" id="sb-recent">🕘 Recently Watched <span id="recent-count">0</span></div>
-        <div class="sb-quick" id="sb-favorites">⭐ Favorites <span id="fav-count">0</span></div>
-        <div class="sb-quick" id="sb-downloads">⬇ Downloads <span id="dl-count">0</span></div>
+        <div class="sb-quick" id="sb-continue">⏱ <span data-i18n="sidebar.continue">Continue Watching</span> <span id="cw-count">0</span></div>
+        <div class="sb-quick" id="sb-recent">🕘 <span data-i18n="sidebar.recent">Recently Watched</span> <span id="recent-count">0</span></div>
+        <div class="sb-quick" id="sb-favorites">⭐ <span data-i18n="sidebar.favorites">Favorites</span> <span id="fav-count">0</span></div>
+        <div class="sb-quick" id="sb-downloads">⬇ <span data-i18n="sidebar.downloads">Downloads</span> <span id="dl-count">0</span></div>
       </div>
       <div class="sb-heading">
-        <span>Categories</span><span id="cat-count">0</span>
+        <span data-i18n="sidebar.categories">Categories</span><span id="cat-count">0</span>
       </div>
-      <input id="cat-search" class="cat-search" placeholder="Search categories" />
+      <input id="cat-search" class="cat-search" placeholder="Search categories" data-i18n-placeholder="sidebar.searchCategories" />
       <div class="cat-list" id="cat-list"></div>
     </aside>
 
@@ -151,7 +151,7 @@
       <div class="content-header">
         <h2 id="content-title">All channels</h2>
         <div class="content-sub" id="content-sub"></div>
-        <input id="item-search" class="item-search" placeholder="Search..." />
+        <input id="item-search" class="item-search" placeholder="Search..." data-i18n-placeholder="content.search" />
       </div>
       <div class="grid" id="item-grid"></div>
 
@@ -251,6 +251,7 @@
 <script src="xtream.js"></script>
 <script src="mse.js"></script>
 <script src="player.js"></script>
+<script src="i18n.js"></script>
 <script src="renderer.js"></script>
 </body>
 </html>

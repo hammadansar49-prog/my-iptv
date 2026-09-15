@@ -201,6 +201,7 @@ function enterApp(auth) {
   const exp = auth.user_info.exp_date;
   $('#account-sub').textContent = exp && exp !== null ? `Expires: ${new Date(exp * 1000).toLocaleDateString()}` : 'Xtream Codes';
   switchSection(settings().startSection);
+  maybeShowLanguagePicker();
 }
 
 function enterAppM3U() {
@@ -210,6 +211,35 @@ function enterAppM3U() {
   $('#account-name').textContent = state.activeAccount.name;
   $('#account-sub').textContent = 'M3U Playlist';
   switchSection(settings().startSection);
+  maybeShowLanguagePicker();
+}
+
+// Shown once, the first time the app is ever entered (tracked by
+// languagePicked in the store) — after that, language only changes from
+// Settings > Language. Built dynamically like the announcement modal so no
+// extra static HTML is needed.
+function maybeShowLanguagePicker() {
+  if (state.store.settings && state.store.settings.languagePicked) return;
+  if (document.getElementById('app-language-picker')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'app-language-picker';
+  overlay.className = 'app-modal-overlay';
+  overlay.innerHTML = `
+    <div class="app-modal-card">
+      <div class="app-modal-title">Choose your language</div>
+      <div class="lang-picker-list">
+        ${LANGUAGES.map((l) => `<button class="btn-secondary lang-picker-btn" data-lang="${l.code}">${l.name}</button>`).join('')}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelectorAll('.lang-picker-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await setSetting('language', btn.dataset.lang);
+      state.store.settings.languagePicked = true;
+      await saveStore();
+      overlay.remove();
+    });
+  });
 }
 
 // ===================== Playlist switcher =====================
@@ -914,7 +944,8 @@ const SETTINGS_DEFAULTS = {
   adultFilter: false,
   downloadWhileWatching: 'on', // on | off
   audioLang: '',          // last audio language picked in the player
-  subtitleLang: ''        // last subtitle language picked ('' = off)
+  subtitleLang: '',       // last subtitle language picked ('' = off)
+  language: 'en'          // app UI language — see src/i18n.js
 };
 
 function settings() {
@@ -936,6 +967,7 @@ function applySettings() {
   document.documentElement.setAttribute('data-poster', s.posterSize);
   if (player) player.setQuality(s.quality);
   updateClock();
+  applyLanguage(s.language);
 }
 
 function initSettings() {
@@ -944,6 +976,7 @@ function initSettings() {
 
 const SETTINGS_SECTIONS = [
   { id: 'playlists', label: 'Playlists', icon: '☰', blurb: 'Add, switch and manage sources.' },
+  { id: 'language', label: 'Language', icon: '🌐', blurb: 'Choose the app\'s display language.' },
   { id: 'general', label: 'General', icon: '⚙', blurb: 'Defaults and playback behaviour.' },
   { id: 'downloads', label: 'Downloads', icon: '⬇', blurb: 'Where downloads are saved, and what is downloading.' },
   { id: 'appearance', label: 'Appearance', icon: '🎨', blurb: 'Theme and layout.' },
@@ -995,6 +1028,7 @@ function openSettings(sectionId = 'playlists') {
   pane.innerHTML = '';
   ({
     playlists: renderPlaylistSettings,
+    language: renderLanguageSettings,
     general: renderGeneralSettings,
     downloads: renderDownloadSettings,
     appearance: renderAppearanceSettings,
@@ -1148,6 +1182,15 @@ function renderPlaylistSettings(pane) {
 }
 
 // ---- General ----
+// ---- Language ----
+function renderLanguageSettings(pane) {
+  const s = settings();
+  pane.innerHTML = settingsCard(t('settings.language.title'),
+    settingsRow(t('settings.language.title'), t('settings.language.help'),
+      selectHtml('set-language', s.language, LANGUAGES.map((l) => [l.code, l.name]))));
+  bindSelect('set-language', 'language');
+}
+
 function renderGeneralSettings(pane) {
   const s = settings();
   pane.innerHTML =
@@ -2979,6 +3022,7 @@ function armAnnouncementAndUpdateWatch() {
 
 async function startup() {
   await loadStore();
+  applyLanguage(settings().language);
   initLicenseGate();
   armLicenseWatch();
   let status;

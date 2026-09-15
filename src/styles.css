@@ -401,6 +401,8 @@ html[data-theme="light"] #view-player { background: #000; }
 .app-modal-title { font-size: 18px; font-weight: 700; margin-bottom: 14px; }
 .app-modal-body { font-size: 14px; color: var(--text-dim); line-height: 1.5; margin-bottom: 20px; white-space: pre-wrap; }
 .app-modal-card .btn-primary { width: 100%; }
+.lang-picker-list { display: flex; flex-direction: column; gap: 8px; }
+.lang-picker-btn { width: 100%; }
 
 .app-update-banner { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; background: rgba(18,16,28,.97); color: #fff; border: 1px solid var(--accent); border-radius: 10px; padding: 10px 14px; font-size: 13px; box-shadow: 0 10px 30px rgba(0,0,0,.45); z-index: 4000; max-width: 90vw; }
 .app-update-banner .btn-primary { width: auto; margin: 0; padding: 8px 14px; font-size: 12px; }
