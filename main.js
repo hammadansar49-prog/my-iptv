@@ -198,7 +198,7 @@ ipcMain.handle('net:getText', async (_e, url) => {
 // License key gate. Update LICENSE_SERVER_URL to the deployed
 // license-server (see license-server/README.md) before shipping a build.
 // ==============================================================
-const LICENSE_SERVER_URL = process.env.MYIPTV_LICENSE_SERVER_URL || 'http://localhost:4100';
+const LICENSE_SERVER_URL = process.env.MYIPTV_LICENSE_SERVER_URL || 'https://theottdeals.com/license';
 
 function getMachineId() {
   const raw = [os.hostname(), os.platform(), os.arch(), (os.cpus()[0] || {}).model || '', os.userInfo().username]

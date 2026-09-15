@@ -82,25 +82,32 @@ slow/unstable connection.
   is duplicated in both `player_screen.dart` and `live_tv_screen.dart` — keep them in sync if one
   changes.
 
-## License key system (new — `license-server/`, plus gate screen in the PC app)
+## License key system (new — `license-server/` / `license-server-php/`, plus gate screen in the PC app)
 
 The PC app is gated behind a license key so it can be sold as a subscription. Two halves:
 
-- **`license-server/`** — a standalone Node/Express service (NOT part of the Electron app, run and
-  hosted separately) that issues and verifies keys and serves live pricing. Data is a plain JSON
-  file (`license-server/licenses.json`, gitignored) via `license-server/db.js` — deliberately not
-  SQLite, because `better-sqlite3` needs a native build toolchain (Python + a C++ compiler) that
-  isn't guaranteed to exist wherever this gets deployed; this failed on first attempt on this very
-  machine (missing Python), which is why it's a JSON file instead, matching the same pattern
-  `main.js` already uses for its own store. Admin panel is `license-server/public/admin.html`
-  (password-gated via `ADMIN_PASSWORD` env var, sent as a Bearer token on every admin request).
+- **The license server** exists in **two implementations of the same API** — pick whichever
+  matches where it's actually hosted:
+  - `license-server/` — Node/Express version. Needs a Node-capable host (Render, Railway, a VPS).
+  - `license-server-php/` — **the one actually deployed**, plain PHP + `.htaccess` rewrites, built
+    because the user's existing Hostinger "Business Web Hosting" plan (used for theottdeals.com)
+    has no Node.js App support, only PHP — see `license-server-php/README.md` for upload steps.
+    Deployed at `https://theottdeals.com/license`. Both versions store data as a JSON file
+    (`licenses.json`, gitignored in both) — deliberately not a real database: the Node version hit
+    a `better-sqlite3` native-build failure (missing Python) on first attempt, and the PHP version
+    avoids needing MySQL credentials set up at all. **If both ever need changing together, change
+    both — they're independent copies of the same logic, not a shared codebase.**
+  - Either way: issues and verifies keys, serves live pricing, admin panel
+    (`public/admin.html` / `admin.html`) is password-gated via `ADMIN_PASSWORD` (env var for the
+    Node version, a `define()` in `config.php` for the PHP version), sent as a Bearer token on
+    every admin request.
 - **PC app integration** (`main.js`, `preload.js`, `src/index.html`, `src/renderer.js`,
   `src/styles.css`): a new `view-license` screen (same `showView()` pattern as every other screen)
   blocks `boot()` from running at all until `license:getStatus` reports a valid, unexpired key.
   `main.js` talks to the license server via `LICENSE_SERVER_URL` (env var
   `MYIPTV_LICENSE_SERVER_URL`, defaults to `http://localhost:4100` for local testing) — **this
-  must be pointed at the real deployed server URL before shipping a build**, or every user will
-  try to verify against localhost and fail.
+  must be pointed at the real deployed server URL (`https://theottdeals.com/license`) before
+  shipping a build**, or every user will try to verify against localhost and fail.
 
 **Pricing is live, not hardcoded**: the license-gate screen calls `license:getPlans` (main.js) →
 `GET /plans` on the license server, so editing a plan's price/label/duration in the admin panel is

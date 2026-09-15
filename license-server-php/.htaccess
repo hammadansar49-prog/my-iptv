@@ -1,0 +1,17 @@
+RewriteEngine On
+
+# Never serve the data file or config directly.
+<FilesMatch "^(licenses\.json|config\.php)$">
+    Require all denied
+</FilesMatch>
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^plans$ index.php?r=plans [QSA,L]
+RewriteRule ^settings$ index.php?r=settings [QSA,L]
+RewriteRule ^verify$ index.php?r=verify [QSA,L]
+RewriteRule ^admin/login$ index.php?r=admin/login [QSA,L]
+RewriteRule ^admin/keys$ index.php?r=admin/keys [QSA,L]
+RewriteRule ^admin/keys/([0-9]+)/revoke$ index.php?r=admin/keys/revoke&id=$1 [QSA,L]
+RewriteRule ^admin/plans$ index.php?r=admin/plans [QSA,L]
+RewriteRule ^admin/plans/([0-9]+)$ index.php?r=admin/plans/id&id=$1 [QSA,L]
+RewriteRule ^admin/settings$ index.php?r=admin/settings [QSA,L]
