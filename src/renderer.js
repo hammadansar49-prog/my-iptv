@@ -2777,7 +2777,10 @@ async function openPackageOnWhatsApp(plan) {
       toast('WhatsApp number is not set up yet — please try again later.');
       return;
     }
-    const message = `Hi TheOTTDeals, I want to purchase the ${plan.label} package (${plan.price} ${plan.currency}, ${plan.duration_days} days). Please share payment details.`;
+    // *bold* is WhatsApp's own markdown (single asterisks), not the app's
+    // "**bold**" specs syntax — this is what actually renders bold once it
+    // lands in the chat.
+    const message = `Hi TheOTTDeals! 👋\n\nI'd like to activate the *MY IPTV ${plan.label}* (${plan.price} ${plan.currency}, ${plan.duration_days} day(s)).\n\nPlease send me the activation details so I can get started.\n\nThank you!`;
     const url = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
     await window.api.openExternal(url);
   } catch {
