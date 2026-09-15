@@ -2757,15 +2757,18 @@ function specsListHtml(specs) {
   return `<ul class="plan-card-specs">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`;
 }
 
-async function renderPlansScreen() {
-  const host = $('#plans-list');
+// Shared by the pre-login "See Plans" screen and the in-app "Upgrade Plans"
+// popup (opened by clicking the PRO badge) — same cards, same Get
+// Package/Get Free Trial wiring, just rendered into whichever container is
+// passed in. `afterTrialClaim` lets each caller decide what happens once a
+// trial is actually activated (the pre-login screen boots straight into the
+// app; the in-app popup just closes and refreshes the badge).
+async function renderPlansInto(host, { afterTrialClaim } = {}) {
   if (!host) return;
   // No "Loading..." placeholder: main.js answers license:getPlans /
   // checkTrialAvailability straight from its own in-memory cache (kept live
   // via an RTDB event stream, see startIptvLiveSync in main.js), so this is
   // effectively instant — there's nothing worth showing a spinner for.
-  // If the plans screen is already open when the admin changes something,
-  // armIptvLiveUpdates() below re-runs this function again automatically.
 
   // Free trial availability/duration/specs and whether it's offered at all
   // are decided server-side (see trial:checkAvailability in main.js) — kept
@@ -2783,9 +2786,9 @@ async function renderPlansScreen() {
       <div class="plan-card-label">Free Trial</div>
       <div class="plan-card-price">${trialDurationLabel}<span class="plan-card-unit"> &middot; one per device</span></div>
       ${specsListHtml(trial.specs)}
-      <button class="btn-get-trial" id="btn-get-trial" type="button" ${trial.available ? '' : 'disabled'}>${trial.available ? 'Get Free Trial' : 'You already used'}</button>
+      <button class="btn-get-trial" data-trial-btn type="button" ${trial.available ? '' : 'disabled'}>${trial.available ? 'Get Free Trial' : 'You already used'}</button>
     </div>` : '';
-  const trialMessageHtml = trial.enabled ? '<p id="trial-message" class="login-error"></p>' : '';
+  const trialMessageHtml = trial.enabled ? '<p data-trial-message class="login-error"></p>' : '';
 
   try {
     const res = await window.api.licenseGetPlans();
@@ -2812,18 +2815,18 @@ async function renderPlansScreen() {
     });
   });
 
-  const trialBtn = $('#btn-get-trial');
+  const trialBtn = host.querySelector('[data-trial-btn]');
   if (trialBtn && !trialBtn.disabled) {
     trialBtn.addEventListener('click', async () => {
       trialBtn.disabled = true;
       trialBtn.textContent = 'Activating...';
-      const msg = $('#trial-message');
+      const msg = host.querySelector('[data-trial-message]');
       if (msg) msg.textContent = '';
       try {
         const res = await window.api.claimTrial();
         if (res.valid) {
           await updateProBadge();
-          boot();
+          if (afterTrialClaim) afterTrialClaim(); else boot();
         } else if (res.reason === 'already-used') {
           trialBtn.textContent = 'You already used';
           if (msg) msg.textContent = 'This device has already used its free trial.';
@@ -2842,6 +2845,46 @@ async function renderPlansScreen() {
       }
     });
   }
+}
+
+async function renderPlansScreen() {
+  await renderPlansInto($('#plans-list'));
+}
+
+// Opened by clicking the PRO badge in the topbar — a compact popup (not the
+// full-screen pre-login plans view) showing the current plan's status plus
+// the same upgrade cards, so a customer whose plan is about to run out can
+// upgrade without leaving whatever they're doing.
+async function showProPlanModal() {
+  if (document.getElementById('app-pro-modal')) return;
+  let statusHtml = '<div class="license-subtitle">Loading your plan...</div>';
+  try {
+    const status = await window.api.licenseGetStatus();
+    if (status.valid && status.expiresAt) {
+      const daysLeft = Math.max(0, Math.ceil((status.expiresAt - Date.now()) / (24 * 60 * 60 * 1000)));
+      statusHtml = `
+        <div class="pro-modal-current">
+          <div class="pro-modal-current-label">Your plan</div>
+          <div class="pro-modal-current-name">${status.plan || 'PRO'}</div>
+          <div class="pro-modal-current-expiry">${daysLeft} day(s) left &middot; expires ${new Date(status.expiresAt).toLocaleDateString()}</div>
+        </div>`;
+    }
+  } catch { /* show the cards anyway even if the status read failed */ }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'app-pro-modal';
+  overlay.className = 'app-modal-overlay';
+  overlay.innerHTML = `
+    <div class="app-modal-card pro-modal-card">
+      <button class="icon-btn pro-modal-close" id="pro-modal-close">✕</button>
+      ${statusHtml}
+      <div class="pro-modal-heading">Upgrade Plans</div>
+      <div id="pro-modal-plans"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('pro-modal-close').addEventListener('click', () => overlay.remove());
+  renderPlansInto(document.getElementById('pro-modal-plans'), { afterTrialClaim: () => overlay.remove() });
 }
 
 function licenseSetError(msg) {
@@ -3210,6 +3253,7 @@ async function startup() {
   armLicenseInvalidationPush();
   armLicenseWatch();
   armIptvLiveUpdates();
+  $('#pro-badge')?.addEventListener('click', showProPlanModal);
   let status;
   try { status = await window.api.licenseGetStatus(); } catch { status = { valid: false }; }
   if (!status.valid) {
