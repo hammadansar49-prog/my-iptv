@@ -290,6 +290,70 @@ ipcMain.handle('shell:openExternal', (_e, url) => {
   return false;
 });
 
+ipcMain.handle('shell:openDownloadUrl', (_e, url) => {
+  // Admin-configured update download link only — locked to https on the
+  // theottdeals domain so this can't be repurposed to open an arbitrary URL.
+  if (typeof url === 'string' && /^https:\/\/([a-z0-9-]+\.)?theottdeals\.com\//.test(url)) {
+    shell.openExternal(url);
+    return true;
+  }
+  return false;
+});
+
+// ==============================================================
+// In-app announcement, set from the theottdeals admin panel's MY IPTV
+// section (iptv/announcement in RTDB). Shown once per announcement (by
+// createdAt) — see armAnnouncementCheck in src/renderer.js for the dismiss
+// bookkeeping.
+// ==============================================================
+ipcMain.handle('announcement:get', async () => {
+  try {
+    const data = await rtdbRequest('GET', '/iptv/announcement');
+    if (!data || !data.text) return { ok: true, announcement: null };
+    if (data.expires_at && data.expires_at < Date.now()) return { ok: true, announcement: null };
+    return { ok: true, announcement: data };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Network error', announcement: null };
+  }
+});
+
+// ==============================================================
+// Update check. Admin publishes the latest version + download link (and an
+// optional "force" flag) from the MY IPTV admin panel's Updates section
+// (iptv/update in RTDB). Compared against this build's own package.json
+// version (app.getVersion()) with plain numeric dotted-version comparison —
+// good enough since this app doesn't use pre-release suffixes.
+// ==============================================================
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+ipcMain.handle('update:check', async () => {
+  try {
+    const data = await rtdbRequest('GET', '/iptv/update');
+    const currentVersion = app.getVersion();
+    if (!data || !data.version) return { ok: true, available: false, currentVersion };
+    const available = compareVersions(data.version, currentVersion) > 0;
+    return {
+      ok: true,
+      available,
+      currentVersion,
+      latestVersion: data.version,
+      downloadUrl: data.download_url || '',
+      notes: data.notes || '',
+      forceUpdate: available && !!data.force_update
+    };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Network error', available: false, currentVersion: app.getVersion() };
+  }
+});
+
 // Reads the key doc, then (if unused) writes back the SAME doc with status
 // flipped to active — RTDB rules only allow this exact unauthenticated
 // transition (see database.rules.json's iptv/keys/$keyId rule), so a

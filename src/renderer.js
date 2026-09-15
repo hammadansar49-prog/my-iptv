@@ -2611,11 +2611,16 @@ async function openPackageOnWhatsApp(plan) {
   try {
     const res = await window.api.licenseGetSettings();
     const number = (res && res.settings && res.settings.whatsappNumber) || '';
-    if (!number) return;
+    if (!number) {
+      toast('WhatsApp number is not set up yet — please try again later.');
+      return;
+    }
     const message = `Hi TheOTTDeals, I want to purchase the ${plan.label} package (${plan.price} ${plan.currency}, ${plan.duration_days} days). Please share payment details.`;
     const url = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
     await window.api.openExternal(url);
-  } catch { /* nothing to show the user for this — the button just won't open */ }
+  } catch {
+    toast('Could not open WhatsApp — check your internet connection.');
+  }
 }
 
 async function renderPlansScreen() {
@@ -2708,6 +2713,102 @@ function armLicenseWatch() {
       }
     } catch { /* ignore — don't lock the user out over a transient error */ }
   }, 2 * 60 * 1000);
+}
+
+// ===================== Announcement =====================
+// Admin-set message from the theottdeals MY IPTV panel (iptv/announcement
+// in RTDB). Shown once per announcement — dismissing it records that
+// announcement's createdAt in the local store so it doesn't reappear on
+// every launch, but a genuinely NEW announcement (different createdAt)
+// shows again even if an older one was dismissed.
+async function checkAnnouncement() {
+  try {
+    const res = await window.api.getAnnouncement();
+    const ann = res && res.announcement;
+    if (!ann || !ann.text) return;
+    const lastSeen = (state.store.settings && state.store.settings.lastSeenAnnouncementAt) || 0;
+    if (ann.created_at && ann.created_at <= lastSeen) return;
+    showAnnouncementModal(ann);
+  } catch { /* offline — just skip, try again next check */ }
+}
+
+function showAnnouncementModal(ann) {
+  if (document.getElementById('app-announcement')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'app-announcement';
+  overlay.className = 'app-modal-overlay';
+  overlay.innerHTML = `
+    <div class="app-modal-card">
+      <div class="app-modal-title">Announcement</div>
+      <div class="app-modal-body">${String(ann.text).replace(/</g, '&lt;')}</div>
+      <button class="btn-primary" id="app-announcement-close">OK</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('app-announcement-close').addEventListener('click', async () => {
+    overlay.remove();
+    state.store.settings = state.store.settings || {};
+    state.store.settings.lastSeenAnnouncementAt = ann.created_at || Date.now();
+    await saveStore();
+  });
+}
+
+// ===================== Update check =====================
+function versionGt(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff > 0;
+  }
+  return false;
+}
+
+async function checkForUpdate() {
+  try {
+    const info = await window.api.checkForUpdate();
+    if (!info || !info.available) return;
+    if (info.forceUpdate) {
+      showForceUpdateScreen(info);
+    } else {
+      showUpdateBanner(info);
+    }
+  } catch { /* offline — just skip, try again next check */ }
+}
+
+function showUpdateBanner(info) {
+  if (document.getElementById('app-update-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'app-update-banner';
+  bar.className = 'app-update-banner';
+  bar.innerHTML = `
+    <span>A new version (${info.latestVersion}) is available.</span>
+    <button class="btn-primary" id="app-update-download">Download Update</button>
+    <button class="icon-btn" id="app-update-dismiss">✕</button>`;
+  document.body.appendChild(bar);
+  document.getElementById('app-update-download').addEventListener('click', () => {
+    if (info.downloadUrl) window.api.openDownloadUrl(info.downloadUrl);
+  });
+  document.getElementById('app-update-dismiss').addEventListener('click', () => bar.remove());
+}
+
+// A forced update blocks the app entirely (admin "shut down this version"),
+// same idea as the license gate — no close button, no way around it besides
+// downloading and installing the newer build.
+function showForceUpdateScreen(info) {
+  if (document.getElementById('app-force-update')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'app-force-update';
+  overlay.className = 'app-modal-overlay app-modal-overlay-solid';
+  overlay.innerHTML = `
+    <div class="app-modal-card">
+      <div class="app-modal-title">Update Required</div>
+      <div class="app-modal-body">A new version (${info.latestVersion}) is required to keep using MY IPTV.${info.notes ? `<br><br>${String(info.notes).replace(/</g, '&lt;')}` : ''}</div>
+      <button class="btn-primary" id="app-force-update-download">Download Update</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('app-force-update-download').addEventListener('click', () => {
+    if (info.downloadUrl) window.api.openDownloadUrl(info.downloadUrl);
+  });
 }
 
 // ===================== Boot =====================
@@ -2867,7 +2968,17 @@ async function boot() {
   }
 }
 
+// Re-checked every 30 minutes while the app is open — an admin publishing a
+// new announcement or update doesn't require the user to restart the app.
+function armAnnouncementAndUpdateWatch() {
+  setInterval(() => {
+    checkAnnouncement();
+    checkForUpdate();
+  }, 30 * 60 * 1000);
+}
+
 async function startup() {
+  await loadStore();
   initLicenseGate();
   armLicenseWatch();
   let status;
@@ -2877,6 +2988,9 @@ async function startup() {
     return;
   }
   await updateProBadge();
+  checkAnnouncement();
+  checkForUpdate();
+  armAnnouncementAndUpdateWatch();
   boot();
 }
 

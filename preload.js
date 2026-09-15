@@ -34,5 +34,8 @@ contextBridge.exposeInMainWorld('api', {
   licenseVerify: (key) => ipcRenderer.invoke('license:verify', key),
   licenseGetPlans: () => ipcRenderer.invoke('license:getPlans'),
   licenseGetSettings: () => ipcRenderer.invoke('license:getSettings'),
-  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url)
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  openDownloadUrl: (url) => ipcRenderer.invoke('shell:openDownloadUrl', url),
+  getAnnouncement: () => ipcRenderer.invoke('announcement:get'),
+  checkForUpdate: () => ipcRenderer.invoke('update:check')
 });
