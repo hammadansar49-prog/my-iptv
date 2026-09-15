@@ -1,4 +1,11 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
+/* Any element toggled via the `hidden` attribute must actually disappear,
+   even when its own class also sets `display` (flex/grid/etc, e.g.
+   .settings-row, .icon-btn). Both rules have equal specificity, so without
+   this, whichever one happens to load later in this file wins — which is
+   exactly what let a `hidden` Download-Update row/button render visible
+   anyway. This settles it globally, once. */
+[hidden] { display: none !important; }
 :root {
   --bg: #16131f;
   --bg-2: #1c1830;
