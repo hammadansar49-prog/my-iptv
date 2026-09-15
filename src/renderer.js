@@ -974,15 +974,19 @@ function initSettings() {
   $('#btn-settings').addEventListener('click', () => openSettings('playlists'));
 }
 
+// label/blurb are i18n keys, not display text — resolved via t() at render
+// time (inside openSettings) so a language switch after this array was
+// built still shows correctly, rather than baking in whatever the language
+// was when the module first loaded.
 const SETTINGS_SECTIONS = [
-  { id: 'playlists', label: 'Playlists', icon: '☰', blurb: 'Add, switch and manage sources.' },
-  { id: 'language', label: 'Language', icon: '🌐', blurb: 'Choose the app\'s display language.' },
-  { id: 'general', label: 'General', icon: '⚙', blurb: 'Defaults and playback behaviour.' },
-  { id: 'downloads', label: 'Downloads', icon: '⬇', blurb: 'Where downloads are saved, and what is downloading.' },
-  { id: 'appearance', label: 'Appearance', icon: '🎨', blurb: 'Theme and layout.' },
-  { id: 'backup', label: 'Backup', icon: '↥', blurb: 'Export or restore your setup.' },
-  { id: 'troubleshooting', label: 'Troubleshooting', icon: '🛟', blurb: 'Caches and diagnostics.' },
-  { id: 'about', label: 'About', icon: 'ⓘ', blurb: 'Version and storage.' }
+  { id: 'playlists', label: 'settings.nav.playlists', icon: '☰', blurb: 'settings.nav.playlists.blurb' },
+  { id: 'language', label: 'settings.nav.language', icon: '🌐', blurb: 'settings.nav.language.blurb' },
+  { id: 'general', label: 'settings.nav.general', icon: '⚙', blurb: 'settings.nav.general.blurb' },
+  { id: 'downloads', label: 'settings.nav.downloads', icon: '⬇', blurb: 'settings.nav.downloads.blurb' },
+  { id: 'appearance', label: 'settings.nav.appearance', icon: '🎨', blurb: 'settings.nav.appearance.blurb' },
+  { id: 'backup', label: 'settings.nav.backup', icon: '↥', blurb: 'settings.nav.backup.blurb' },
+  { id: 'troubleshooting', label: 'settings.nav.troubleshooting', icon: '🛟', blurb: 'settings.nav.troubleshooting.blurb' },
+  { id: 'about', label: 'settings.nav.about', icon: 'ⓘ', blurb: 'settings.nav.about.blurb' }
 ];
 
 function openSettings(sectionId = 'playlists') {
@@ -995,7 +999,7 @@ function openSettings(sectionId = 'playlists') {
       <div class="settings-dialog">
         <div class="settings-head">
           <div>
-            <h3>Settings</h3>
+            <h3 id="settings-title">${t('settings.title')}</h3>
             <div class="settings-blurb" id="settings-blurb"></div>
           </div>
           <button id="settings-close" class="icon-btn">✕</button>
@@ -1014,14 +1018,20 @@ function openSettings(sectionId = 'playlists') {
       const btn = document.createElement('button');
       btn.className = 'settings-nav-item';
       btn.dataset.section = sec.id;
-      btn.innerHTML = `<span class="sn-ic">${sec.icon}</span> ${sec.label}`;
+      btn.innerHTML = `<span class="sn-ic">${sec.icon}</span> ${t(sec.label)}`;
       btn.addEventListener('click', () => openSettings(sec.id));
       nav.appendChild(btn);
+    });
+  } else {
+    $('#settings-title').textContent = t('settings.title');
+    $$('.settings-nav-item').forEach((btn) => {
+      const sec = SETTINGS_SECTIONS.find((s) => s.id === btn.dataset.section);
+      if (sec) btn.innerHTML = `<span class="sn-ic">${sec.icon}</span> ${t(sec.label)}`;
     });
   }
 
   const meta = SETTINGS_SECTIONS.find((s) => s.id === sectionId) || SETTINGS_SECTIONS[0];
-  $('#settings-blurb').textContent = meta.blurb;
+  $('#settings-blurb').textContent = t(meta.blurb);
   $$('.settings-nav-item').forEach((b) => b.classList.toggle('active', b.dataset.section === sectionId));
 
   const pane = $('#settings-pane');
@@ -1080,37 +1090,37 @@ function renderPlaylistSettings(pane) {
     const active = state.activeAccount && acc.id === state.activeAccount.id;
     return `<div class="pls-row${active ? ' active' : ''}" data-id="${acc.id}">
         <div class="pls-main">
-          <div class="pls-name">${escapeHtml(acc.name)} ${active ? '<span class="pls-badge">SELECTED</span>' : ''}</div>
-          <div class="pls-sub">${acc.type === 'xtream' ? 'Xtream Codes' : 'M3U'} · ${escapeHtml(acc.url)}</div>
+          <div class="pls-name">${escapeHtml(acc.name)} ${active ? `<span class="pls-badge">${t('playlists.selected')}</span>` : ''}</div>
+          <div class="pls-sub">${acc.type === 'xtream' ? t('playlists.xtream') : 'M3U'} · ${escapeHtml(acc.url)}</div>
         </div>
         <div class="pls-actions">
-          ${active ? '' : `<button class="btn-mini" data-act="use" data-id="${acc.id}">Use</button>`}
-          <button class="btn-mini danger" data-act="del" data-id="${acc.id}">Remove</button>
+          ${active ? '' : `<button class="btn-mini" data-act="use" data-id="${acc.id}">${t('playlists.use')}</button>`}
+          <button class="btn-mini danger" data-act="del" data-id="${acc.id}">${t('playlists.remove')}</button>
         </div>
       </div>`;
-  }).join('') || '<div class="settings-empty">No playlists yet — add one below.</div>';
+  }).join('') || `<div class="settings-empty">${t('playlists.empty')}</div>`;
 
   pane.innerHTML =
-    settingsCard(`Your playlists (${accounts.length})`, rows) +
-    settingsCard('Add playlist', `
+    settingsCard(`${t('playlists.yours')} (${accounts.length})`, rows) +
+    settingsCard(t('playlists.add'), `
       <div class="pls-tabs">
-        <button class="pls-tab active" data-kind="xtream">Xtream Codes</button>
-        <button class="pls-tab" data-kind="m3u">M3U URL</button>
+        <button class="pls-tab active" data-kind="xtream">${t('playlists.xtream')}</button>
+        <button class="pls-tab" data-kind="m3u">${t('playlists.m3u')}</button>
       </div>
       <div id="pls-form-xtream">
         <input class="settings-input" id="pls-x-url" placeholder="http://example.com:8080" />
         <div class="pls-two">
-          <input class="settings-input" id="pls-x-user" placeholder="Username" />
-          <input class="settings-input" id="pls-x-pass" placeholder="Password" type="password" />
+          <input class="settings-input" id="pls-x-user" placeholder="${t('playlists.username')}" />
+          <input class="settings-input" id="pls-x-pass" placeholder="${t('playlists.password')}" type="password" />
         </div>
       </div>
       <div id="pls-form-m3u" hidden>
-        <input class="settings-input" id="pls-m-name" placeholder="Playlist name (optional)" />
+        <input class="settings-input" id="pls-m-name" placeholder="${t('playlists.playlistName')}" />
         <input class="settings-input" id="pls-m-url" placeholder="http://example.com/playlist.m3u" />
       </div>
       <div class="pls-add-foot">
-        <span class="sr-help" id="pls-msg">Credentials are stored only on this device.</span>
-        <button class="btn-primary" id="pls-add">＋ Add Playlist</button>
+        <span class="sr-help" id="pls-msg">${t('playlists.credentialsNote')}</span>
+        <button class="btn-primary" id="pls-add">${t('playlists.addButton')}</button>
       </div>`);
 
   pane.querySelectorAll('[data-act="use"]').forEach((b) => b.addEventListener('click', () => {
