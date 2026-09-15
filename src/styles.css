@@ -69,9 +69,11 @@ input { font-family: inherit; }
 .plan-card-label { font-size: 15px; font-weight: 700; color: var(--text); }
 .plan-card-price { font-size: 13px; font-weight: 600; color: var(--accent); margin-top: 4px; }
 .plan-card-unit { font-weight: 400; color: var(--text-dim); }
-.plan-card-specs { list-style: none; margin: 10px 0 0; padding: 0; flex: 1; }
-.plan-card-specs li { font-size: 11.5px; color: var(--text-dim); padding: 3px 0 3px 14px; position: relative; line-height: 1.35; }
-.plan-card-specs li::before { content: '✓'; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
+.plan-card-specs { margin: 10px 0 0; flex: 1; font-size: 11.5px; color: var(--text-dim); line-height: 1.45; overflow-wrap: break-word; }
+.plan-card-specs p { margin: 0 0 8px; }
+.plan-card-specs p:last-child { margin-bottom: 0; }
+.plan-card-specs h4 { font-size: 12.5px; font-weight: 700; color: var(--text); margin: 0 0 6px; }
+.plan-card-specs strong { color: var(--text); font-weight: 700; }
 .plan-card .btn-get-package,
 .plan-card .btn-get-trial { margin-top: 12px; width: 100%; }
 
@@ -83,7 +85,8 @@ input { font-family: inherit; }
 .plan-card-trial { border-color: #d4af37; background: linear-gradient(160deg, rgba(212,175,55,.16), rgba(212,175,55,.05)); }
 .plan-card-trial .plan-card-label { color: #f0c852; }
 .plan-card-trial .plan-card-price { color: #d4af37; }
-.plan-card-trial .plan-card-specs li::before { color: #d4af37; }
+.plan-card-trial .plan-card-specs h4 { color: #f0c852; }
+.plan-card-trial .plan-card-specs strong { color: #f0c852; }
 .btn-get-trial { padding: 9px 16px; background: linear-gradient(135deg, #d4af37, #b8912c); border: none; border-radius: 8px; color: #221a05; font-weight: 700; font-size: 12px; white-space: nowrap; }
 .btn-get-trial:hover:not(:disabled) { filter: brightness(1.08); }
 .btn-get-trial:disabled { background: var(--bg-2); color: var(--text-dim); cursor: not-allowed; }

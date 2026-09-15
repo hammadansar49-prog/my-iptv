@@ -2785,14 +2785,25 @@ async function openPackageOnWhatsApp(plan) {
   }
 }
 
-// Renders a plan's optional multi-line "specs" text as a bullet list — one
-// bullet per non-empty line — so the admin can write plain lines in the
-// textarea and get a proper feature list here, no markup needed on their end.
-function specsListHtml(specs) {
+// Renders a plan's/trial's optional "specs" text with the same lightweight
+// formatting the admin typed in the panel's textarea — so what they write
+// (### headings, **bold**, plain paragraphs) shows up looking the same way
+// in the app instead of being flattened into a plain bullet list. Escapes
+// HTML first (this is admin-authored, but still untrusted input as far as
+// the renderer is concerned), then layers on just these three things:
+// "### "/"## "/"# " headings, "**bold**", and blank-line-separated
+// paragraphs (a single newline inside a paragraph becomes a <br>).
+function renderSpecsMarkdown(specs) {
   if (!specs) return '';
-  const lines = String(specs).split('\n').map((l) => l.trim()).filter(Boolean);
-  if (!lines.length) return '';
-  return `<ul class="plan-card-specs">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`;
+  const escaped = escapeHtml(String(specs).trim());
+  if (!escaped) return '';
+  const withInline = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  const paragraphs = withInline.split(/\n\s*\n/).map((block) => {
+    const heading = /^#{1,3}\s+(.+)$/.exec(block.trim());
+    if (heading) return `<h4>${heading[1]}</h4>`;
+    return `<p>${block.replace(/\n/g, '<br>')}</p>`;
+  });
+  return `<div class="plan-card-specs">${paragraphs.join('')}</div>`;
 }
 
 // Shared by the pre-login "See Plans" screen and the in-app "Upgrade Plans"
@@ -2823,7 +2834,7 @@ async function renderPlansInto(host, { afterTrialClaim } = {}) {
     <div class="plan-card plan-card-trial">
       <div class="plan-card-label">Free Trial</div>
       <div class="plan-card-price">${trialDurationLabel}<span class="plan-card-unit"> &middot; one per device</span></div>
-      ${specsListHtml(trial.specs)}
+      ${renderSpecsMarkdown(trial.specs)}
       <button class="btn-get-trial" data-trial-btn type="button" ${trial.available ? '' : 'disabled'}>${trial.available ? 'Get Free Trial' : 'You already used'}</button>
     </div>` : '';
   const trialMessageHtml = trial.enabled ? '<p data-trial-message class="login-error"></p>' : '';
@@ -2838,7 +2849,7 @@ async function renderPlansInto(host, { afterTrialClaim } = {}) {
       <div class="plan-card">
         <div class="plan-card-label">${p.label}</div>
         <div class="plan-card-price">${p.price} ${p.currency}<span class="plan-card-unit"> &middot; ${p.duration_days} day(s)</span></div>
-        ${specsListHtml(p.specs)}
+        ${renderSpecsMarkdown(p.specs)}
         <button class="btn-get-package" data-plan-index="${i}" type="button">Get Package</button>
       </div>
     `).join('')
