@@ -54,14 +54,14 @@ input { font-family: inherit; }
 
 /* ---------- PLANS SCREEN ---------- */
 #view-plans.active { align-items: center; justify-content: center; background: radial-gradient(circle at 30% 20%, #2a2050, #14111f 70%); }
-.plans-card { width: min(900px, 92vw); max-height: 86vh; display: flex; flex-direction: column; }
+.plans-card { width: min(1100px, 95vw); max-height: 86vh; display: flex; flex-direction: column; }
 .plans-list { max-height: 62vh; overflow-y: auto; margin-bottom: 4px; padding: 2px; }
 
 /* Uniform-size card grid — every card (trial or paid) gets the same
    min-height regardless of how much specs text it has, and however many
    plans the admin adds, the grid just wraps to more rows at the same
    column width instead of stretching/shrinking individual cards. */
-.plans-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; align-items: stretch; }
+.plans-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; align-items: stretch; }
 .plan-card {
   display: flex; flex-direction: column; text-align: left; background: rgba(255,255,255,.035);
   backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.08);
@@ -451,7 +451,7 @@ html[data-theme="light"] #view-player { background: #000; }
 .ann-star.filled { color: #f0c852; }
 .ann-comment { width: 100%; margin-bottom: 14px; resize: vertical; min-height: 44px; }
 .app-modal-card .btn-primary { width: 100%; }
-.app-modal-card.pro-modal-card { width: min(760px, 92vw); text-align: left; }
+.app-modal-card.pro-modal-card { width: min(1100px, 95vw); text-align: left; }
 .lang-picker-list { display: flex; flex-direction: column; gap: 8px; }
 .lang-picker-btn { width: 100%; }
 
