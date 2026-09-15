@@ -463,6 +463,43 @@ function thumbUrl(url, w = 300) {
   return `${base}/thumb?w=${w}&url=${encodeURIComponent(url)}`;
 }
 
+// Real movies/episodes almost always carry a year somewhere (in the name,
+// or a release_date/added field); odd one-off clips that got miscategorized
+// into a VOD/series category (a wrestling show recording, a single sports
+// clip, etc.) usually don't. Sorting real dated content to the top and
+// undated stragglers to the bottom is purely a display-order change — it
+// never touches what gets fetched, cached, or how any other section works.
+function extractYear(item, section) {
+  const name = item.name || item.title || '';
+  const m = /(19|20)\d{2}/.exec(name);
+  if (m) return parseInt(m[0], 10);
+  if (section === 'series' && item.release_date) {
+    const y = parseInt(String(item.release_date).slice(0, 4), 10);
+    if (y > 1900 && y < 2100) return y;
+  }
+  if (section === 'movies' && item.added) {
+    // "added" is when the provider added it to the catalog, not its release
+    // year — only used as a last-resort recency signal when the name itself
+    // has no year, never shown to the user.
+    const d = new Date(parseInt(item.added, 10) * 1000);
+    if (!isNaN(d.getTime())) return d.getFullYear();
+  }
+  return null;
+}
+
+function sortByRecency(items, section) {
+  return items
+    .map((it, i) => ({ it, i, year: extractYear(it, section) }))
+    .sort((a, b) => {
+      if (a.year === null && b.year === null) return a.i - b.i; // keep original relative order
+      if (a.year === null) return 1;  // no detectable year -> sink to the bottom
+      if (b.year === null) return -1;
+      if (b.year !== a.year) return b.year - a.year; // newest first
+      return a.i - b.i;
+    })
+    .map((x) => x.it);
+}
+
 async function loadItemsForCategory(catId) {
   state.viewingDownloads = false;
   const key = cacheKey(catId);
@@ -508,6 +545,7 @@ async function loadItemsForCategory(catId) {
     }
     if (mySeq !== state.loadSeq) return; // a newer load superseded this one — discard
     items = withoutAdult(items, (it) => it.name || it.title);
+    if (section === 'movies' || section === 'series') items = sortByRecency(items, section);
     state.itemCache[key] = items;
     state.items = items;
     renderGrid();
@@ -2695,8 +2733,8 @@ async function refreshCatalogInBackground(client, account) {
       state.movieCats = movieCats;
       state.seriesCats = seriesCats;
       state.itemCache['live:all'] = liveItems;
-      state.itemCache['movies:all'] = movieItems;
-      state.itemCache['series:all'] = seriesItems;
+      state.itemCache['movies:all'] = sortByRecency(movieItems, 'movies');
+      state.itemCache['series:all'] = sortByRecency(seriesItems, 'series');
     }
 
     await window.api.setCatalog({
@@ -3129,8 +3167,8 @@ async function boot() {
           state.movieCats = nonEmpty(cache.movieCats);
           state.seriesCats = nonEmpty(cache.seriesCats);
           if (nonEmpty(cache.liveItems)) state.itemCache['live:all'] = cache.liveItems;
-          if (nonEmpty(cache.movieItems)) state.itemCache['movies:all'] = cache.movieItems;
-          if (nonEmpty(cache.seriesItems)) state.itemCache['series:all'] = cache.seriesItems;
+          if (nonEmpty(cache.movieItems)) state.itemCache['movies:all'] = sortByRecency(cache.movieItems, 'movies');
+          if (nonEmpty(cache.seriesItems)) state.itemCache['series:all'] = sortByRecency(cache.seriesItems, 'series');
           splashSetProgress(100, 'Ready!');
           enterApp(auth);
           // Refresh the catalog in the background so the next launch (and
@@ -3169,10 +3207,12 @@ async function boot() {
 
         const liveItems = await fetchList(() => client.getLiveStreams(null));
         stepProgress('Loading channels...');
-        const movieItems = await fetchList(() => client.getVodStreams(null));
+        let movieItems = await fetchList(() => client.getVodStreams(null));
         stepProgress('Loading movies...');
-        const seriesItems = await fetchList(() => client.getSeries(null));
+        let seriesItems = await fetchList(() => client.getSeries(null));
         stepProgress('Loading series...');
+        if (movieItems && movieItems.length) movieItems = sortByRecency(movieItems, 'movies');
+        if (seriesItems && seriesItems.length) seriesItems = sortByRecency(seriesItems, 'series');
 
         // Seed the item cache with everything just fetched so switching
         // between Live/Movies/Series tabs right after boot is instant —
