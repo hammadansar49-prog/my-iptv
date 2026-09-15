@@ -2074,6 +2074,77 @@ function expandLiveToFullscreen() {
   showView('player');
 }
 
+// Switches the channel while already in the fullscreen live player — same
+// shared video/player instance as everywhere else in Live TV, so this is a
+// source change, not a reload of the whole player view. Mirrors
+// expandLiveToFullscreen's own state/UI updates, just without touching
+// showView (we're already on it).
+function switchLiveChannelFullscreen(channel) {
+  const previousKey = currentPreviewChannel && currentPreviewChannel.stream_id;
+  currentPreviewChannel = channel;
+  if (previousKey != null) liveListRowsByKey.get(previousKey)?.classList.remove('active');
+  liveListRowsByKey.get(channel.stream_id)?.classList.add('active');
+
+  state.episodeContext = null;
+  const url = state.client ? state.client.liveStreamUrl(channel.stream_id, 'm3u8') : channel.url;
+  player.play(url, { isLive: true });
+
+  state.nowPlaying = {
+    url, isLive: true, type: 'live', title: channel.name, subtitle: 'Live TV',
+    thumb: channel.stream_icon || '', favSection: 'live', favItem: channel, historyKey: `live:${channel.stream_id}`
+  };
+  $('#p-np-title').textContent = channel.name;
+  $('#p-np-sub').textContent = 'Live TV';
+  $('#p-np-thumb').style.backgroundImage = channel.stream_icon ? `url('${channel.stream_icon}')` : '';
+  $('#p-fav').textContent = isFavorite('live', channel) ? '♥' : '♡';
+  updatePlayerDownloadButton();
+}
+
+// Clicking the now-playing name/logo while watching a live channel in
+// fullscreen opens a searchable list of every channel, so switching doesn't
+// need backing out to the Live TV grid first.
+function openFullscreenChannelPicker() {
+  if (!state.nowPlaying || !state.nowPlaying.isLive) return;
+  if (document.getElementById('live-channel-picker')) return;
+  const allChannels = state.itemCache['live:all'] || [];
+
+  const overlay = document.createElement('div');
+  overlay.id = 'live-channel-picker';
+  overlay.className = 'app-modal-overlay';
+  overlay.innerHTML = `
+    <div class="app-modal-card channel-picker-card">
+      <input id="channel-picker-search" class="settings-input" placeholder="Search channels..." autocomplete="off" />
+      <div id="channel-picker-list" class="channel-picker-list"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const closePicker = () => { cancelPostersIn(listEl); overlay.remove(); };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closePicker(); });
+
+  const listEl = document.getElementById('channel-picker-list');
+  const renderPickerList = (query) => {
+    const q = (query || '').trim().toLowerCase();
+    const items = q ? allChannels.filter((c) => (c.name || '').toLowerCase().includes(q)) : allChannels;
+    listEl.innerHTML = items.slice(0, 500).map((ch) => `
+      <div class="live-row" data-picker-id="${ch.stream_id}">
+        <div class="live-row-logo"${ch.stream_icon ? ` data-bg="${thumbUrl(ch.stream_icon, 160)}"` : ''}></div>
+        <div class="live-row-name">${escapeHtml(ch.name)}</div>
+        ${ch.stream_icon ? '' : '<span class="live-row-badge">TV</span>'}
+      </div>`).join('') || '<div class="empty-state">No channels found.</div>';
+    listEl.querySelectorAll('[data-picker-id]').forEach((row) => {
+      row.addEventListener('click', () => {
+        const ch = allChannels.find((c) => String(c.stream_id) === row.dataset.pickerId);
+        if (ch) switchLiveChannelFullscreen(ch);
+        closePicker();
+      });
+    });
+    observePosters(listEl, listEl);
+  };
+  renderPickerList('');
+  const searchInput = document.getElementById('channel-picker-search');
+  searchInput.addEventListener('input', () => renderPickerList(searchInput.value));
+  searchInput.focus();
+}
+
 function playLiveInline(channel) {
   if (!player) initPlayer();
   wireLiveInlineControlsOnce();
@@ -2302,6 +2373,12 @@ async function initPlayer() {
   } catch { /* proxy playback simply won't be available as a fallback */ }
 
   player.onStateChange = fullscreenStateHandler;
+
+  // Clicking the channel name/logo while watching live opens a searchable
+  // list of every channel to switch to, right from the fullscreen player.
+  $('#p-nowplaying').addEventListener('click', () => {
+    if (state.nowPlaying && state.nowPlaying.isLive) openFullscreenChannelPicker();
+  });
 
   video.addEventListener('play', () => { $('#p-playpause').textContent = '⏸'; });
   video.addEventListener('pause', () => { $('#p-playpause').textContent = '▶'; });

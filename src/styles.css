@@ -123,8 +123,9 @@ input { font-family: inherit; }
 .clock #clock-time { font-size: 14px; font-weight: 600; }
 .clock #clock-date { font-size: 10px; color: var(--text-dim); }
 .tb-tabs { display: flex; gap: 6px; background: var(--bg-3); padding: 4px; border-radius: 10px; }
-.tb-tab { padding: 8px 18px; border: none; background: transparent; color: var(--text-dim); border-radius: 8px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
-.tb-tab.active { background: var(--accent); color: #fff; }
+.tb-tab { padding: 8px 18px; border: none; background: transparent; color: var(--text-dim); border-radius: 8px; font-size: 13px; display: flex; align-items: center; gap: 6px; transition: background .15s ease, color .15s ease, transform .15s ease; }
+.tb-tab.active { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+.tb-tab:hover:not(.active) { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; transform: translateY(-2px) scale(1.04); }
 .tb-right { display: flex; align-items: center; gap: 10px; }
 .playlist-switch { position: relative; }
 .playlist-pill { display: flex; align-items: center; gap: 9px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 9px; padding: 6px 10px; color: var(--text); cursor: pointer; line-height: 1.3; }
@@ -295,7 +296,10 @@ input { font-family: inherit; }
 .p-ctl { background: rgba(255,255,255,.08); border: none; color: #fff; width: 38px; height: 38px; border-radius: 8px; font-size: 14px; }
 .p-ctl:hover { background: rgba(255,255,255,.18); }
 #p-playpause { width: 44px; height: 44px; background: var(--accent); font-size: 16px; }
-.p-nowplaying { display: flex; align-items: center; gap: 8px; margin-left: 10px; }
+.p-nowplaying { display: flex; align-items: center; gap: 8px; margin-left: 10px; cursor: pointer; }
+
+.channel-picker-card { width: min(480px, 92vw); max-height: 80vh; display: flex; flex-direction: column; text-align: left; }
+.channel-picker-list { overflow-y: auto; margin-top: 10px; flex: 1; }
 .p-np-thumb { width: 34px; height: 34px; border-radius: 6px; background: var(--bg-3) center/cover no-repeat; }
 .p-np-text { font-size: 11px; line-height: 1.3; color: #ddd; max-width: 260px; }
 .p-np-text #p-np-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
