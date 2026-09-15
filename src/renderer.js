@@ -2780,8 +2780,8 @@ function initLicenseGate() {
       } else {
         const messages = {
           'not-found': 'This key was not found.',
-          'expired': 'This key has expired.',
-          'revoked': 'This key has been revoked.',
+          'expired': 'Your plan has ended. Click "See Plans" to activate a new plan. Thank you.',
+          'revoked': 'Your plan has ended. Click "See Plans" to activate a new plan. Thank you.',
           'wrong-device': 'This key is already active on another device.',
           'device-limit-reached': 'This key has reached its device limit.',
           'network-error': 'Could not reach the license server. Check your internet connection.'
