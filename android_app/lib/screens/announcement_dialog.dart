@@ -1,0 +1,72 @@
+import 'package:flutter/material.dart';
+import '../license.dart';
+import '../storage.dart';
+import '../theme.dart';
+
+/// Shows the admin-set in-app announcement (same `iptv/announcement` RTDB
+/// node the PC app reads) once per announcement — tracked by its
+/// `created_at` so editing/replacing it in the admin panel shows the new
+/// one again even if the old one was already dismissed. Optional star +
+/// comment feedback, only collected when the admin turns on
+/// `collect_feedback` for that announcement.
+Future<void> maybeShowAnnouncement(BuildContext context, LicenseService license) async {
+  final data = await license.getAnnouncement();
+  if (data == null) return;
+  final createdAt = (data['created_at'] as num?)?.toInt() ?? 0;
+  final dismissedAt = Storage.p.getInt('announcementDismissed') ?? 0;
+  if (createdAt != 0 && createdAt == dismissedAt) return;
+  if (!context.mounted) return;
+
+  final collectFeedback = data['collect_feedback'] == true;
+  int rating = 0;
+  final commentController = TextEditingController();
+
+  await showDialog(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) => AlertDialog(
+        backgroundColor: AppColors.bg2,
+        title: Text(data['title']?.toString().isNotEmpty == true ? data['title'].toString() : 'Announcement'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(data['text'].toString()),
+              if (collectFeedback) ...[
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (i) => IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(i < rating ? Icons.star : Icons.star_border, color: AppColors.accent),
+                        onPressed: () => setState(() => rating = i + 1),
+                      )),
+                ),
+                if (rating > 0)
+                  TextField(
+                    controller: commentController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(isDense: true, hintText: 'Add a comment (optional)'),
+                  ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          if (collectFeedback && rating > 0)
+            TextButton(
+              onPressed: () async {
+                await license.submitAnnouncementReview(rating: rating, comment: commentController.text, announcementCreatedAt: createdAt);
+                if (ctx.mounted) Navigator.of(ctx).pop();
+              },
+              child: const Text('Submit'),
+            ),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close')),
+        ],
+      ),
+    ),
+  );
+
+  if (createdAt != 0) await Storage.p.setInt('announcementDismissed', createdAt);
+}

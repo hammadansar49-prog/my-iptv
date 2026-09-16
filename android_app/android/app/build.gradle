@@ -26,7 +26,11 @@ if (flutterVersionName == null) {
 android {
     namespace = "com.veo.iptvplayer.iptv_player"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // No plugin here compiles native code from source (media_kit ships
+    // prebuilt .so files) — leaving ndkVersion unset skips Gradle's
+    // auto-download of a many-hundred-MB NDK package that isn't needed,
+    // which was failing repeatedly on this network (TLS corruption on the
+    // big download, unrelated to this project).
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8

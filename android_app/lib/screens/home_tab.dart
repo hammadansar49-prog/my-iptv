@@ -1,20 +1,23 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../artwork.dart';
+import '../license.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../xtream_client.dart';
-import 'player_screen.dart';
 import 'series_screen.dart';
 import 'lists_screen.dart';
 import 'live_tv_screen.dart';
+import 'plans_sheet.dart';
 
 const kPillSections = ['movies', 'series', 'live'];
 const kPillLabels = {'movies': 'Movies', 'series': 'Series', 'live': 'Live TV'};
 
 class HomeTab extends StatefulWidget {
   final AppState state;
-  const HomeTab({super.key, required this.state});
+  final LicenseService? license;
+  const HomeTab({super.key, required this.state, this.license});
 
   @override
   State<HomeTab> createState() => _HomeTabState();
@@ -38,6 +41,8 @@ class _HomeTabState extends State<HomeTab> {
   int heroIndex = 0;
   final scrollCtrl = ScrollController();
   final pageCtrl = PageController(viewportFraction: 1);
+  final searchCtrl = TextEditingController();
+  Timer? _heroAutoTimer;
 
   @override
   void initState() {
@@ -50,6 +55,35 @@ class _HomeTabState extends State<HomeTab> {
       }
     });
     _loadSection();
+    _armHeroAutoplay();
+  }
+
+  // The hero carousel (poster + Play/My List row at the top of Home) now
+  // advances itself every few seconds instead of sitting still until the
+  // user swipes it — same PageView/dots indicator as before, just driven by
+  // this timer in addition to manual drags. Paused for a beat on any real
+  // touch (see the ScrollNotification handling in _buildHero) so it doesn't
+  // fight the user mid-swipe, and restarted after they let go.
+  void _armHeroAutoplay() {
+    _heroAutoTimer?.cancel();
+    _heroAutoTimer = Timer.periodic(const Duration(seconds: 5), (_) => _advanceHero());
+  }
+
+  void _advanceHero() {
+    if (!mounted || !pageCtrl.hasClients) return;
+    final len = items.length.clamp(0, 15);
+    if (len <= 1) return;
+    final next = (heroIndex + 1) % len;
+    pageCtrl.animateToPage(next, duration: const Duration(milliseconds: 650), curve: Curves.easeInOutCubic);
+  }
+
+  @override
+  void dispose() {
+    _heroAutoTimer?.cancel();
+    searchCtrl.dispose();
+    pageCtrl.dispose();
+    scrollCtrl.dispose();
+    super.dispose();
   }
 
   String get _cacheKey => '$section:${categoryId ?? 'all'}';
@@ -57,6 +91,7 @@ class _HomeTabState extends State<HomeTab> {
   Future<void> _loadSection() async {
     categoryId = null;
     heroIndex = 0;
+    if (pageCtrl.hasClients) pageCtrl.jumpToPage(0);
 
     if (widget.state.catCache.containsKey(section)) {
       setState(() {
@@ -231,7 +266,7 @@ class _HomeTabState extends State<HomeTab> {
   void _goToPlayer(PlayRequest req, {String? favSection, PlayableItem? favItem}) {
     final existing = widget.state.findHistory(req.historyKey);
     if (existing != null) req.resumeAt = existing.resumeAt;
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(state: widget.state, request: req, favSection: favSection, favItem: favItem)));
+    widget.state.launchPlayer(req, favSection: favSection, favItem: favItem);
   }
 
   @override
@@ -277,11 +312,39 @@ class _HomeTabState extends State<HomeTab> {
           ),
           const SizedBox(width: 10),
           const Expanded(child: Text('MY IPTV', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700))),
+          if (widget.license != null) _buildProBadge(),
           IconButton(
             icon: const Icon(Icons.favorite, color: AppColors.accent),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListsScreen(state: widget.state, kind: ListsKind.favorites))),
           ),
         ],
+      ),
+    );
+  }
+
+  // Same logic as updateProBadge() in the PC app's renderer.js: shows "PRO"
+  // normally, switches to a red/orange "PRO · Nd left" as the key/trial gets
+  // close to expiring so the user notices before it lapses. Tapping it opens
+  // the same Plans popup as the license gate's "See Plans", so upgrading
+  // never requires logging out first.
+  Widget _buildProBadge() {
+    final status = widget.license!.localStatus();
+    if (!status.valid) return const SizedBox.shrink();
+    final daysLeft = ((status.expiresAt - DateTime.now().millisecondsSinceEpoch) / 86400000).ceil();
+    final warn = daysLeft <= 7;
+    final label = status.isTrial
+        ? (warn ? 'TRIAL · ${daysLeft}d' : 'TRIAL')
+        : (warn ? 'PRO · ${daysLeft}d' : 'PRO');
+    final color = warn ? const Color(0xFFEF4444) : AppColors.accent;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: GestureDetector(
+        onTap: () => showPlansSheet(context, widget.license!),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(color: color.withOpacity(.15), borderRadius: BorderRadius.circular(20), border: Border.all(color: color)),
+          child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+        ),
       ),
     );
   }
@@ -292,9 +355,16 @@ class _HomeTabState extends State<HomeTab> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: TextField(
+            controller: searchCtrl,
             onChanged: (v) => setState(() => search = v),
             style: const TextStyle(fontSize: 13),
-            decoration: const InputDecoration(isDense: true, hintText: 'Search...', prefixIcon: Icon(Icons.search, size: 18)),
+            decoration: InputDecoration(
+              isDense: true, hintText: 'Search...', prefixIcon: const Icon(Icons.search, size: 18),
+              suffixIcon: search.isEmpty ? null : IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: () { searchCtrl.clear(); setState(() => search = ''); },
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 10),
@@ -340,7 +410,20 @@ class _HomeTabState extends State<HomeTab> {
       height: 380,
       child: Stack(
         children: [
-          PageView.builder(
+          NotificationListener<ScrollNotification>(
+            // `dragDetails != null` is what tells a real finger-drag apart
+            // from the animateToPage() call _advanceHero() itself makes
+            // (that one reports null) — so this only pauses the autoplay
+            // timer for an actual manual swipe, and only that swipe.
+            onNotification: (n) {
+              if (n is ScrollStartNotification && n.dragDetails != null) {
+                _heroAutoTimer?.cancel();
+              } else if (n is ScrollEndNotification && n.dragDetails != null) {
+                _armHeroAutoplay();
+              }
+              return false;
+            },
+            child: PageView.builder(
             controller: pageCtrl,
             itemCount: hero.length,
             onPageChanged: (i) => setState(() => heroIndex = i),
@@ -404,6 +487,7 @@ class _HomeTabState extends State<HomeTab> {
                 ),
               );
             },
+            ),
           ),
           Positioned(
             bottom: 8, left: 0, right: 0,

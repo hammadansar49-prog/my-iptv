@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 import '../app_state.dart';
+import '../license.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'login_screen.dart';
 import 'advanced_settings_sheet.dart';
 import 'security_sheet.dart';
 import 'downloads_settings_sheet.dart';
+import 'update_dialog.dart';
 
 class ProfileTab extends StatefulWidget {
   final AppState state;
+  final LicenseService? license;
   final VoidCallback onLoggedOut;
-  const ProfileTab({super.key, required this.state, required this.onLoggedOut});
+  const ProfileTab({super.key, required this.state, this.license, required this.onLoggedOut});
 
   @override
   State<ProfileTab> createState() => _ProfileTabState();
@@ -94,6 +97,22 @@ class _ProfileTabState extends State<ProfileTab> {
       backgroundColor: Colors.transparent,
       builder: (_) => DownloadsSettingsSheet(state: widget.state),
     );
+  }
+
+  bool _checkingUpdate = false;
+
+  // Manual re-check for the Profile screen — separate from the silent one
+  // main_shell.dart runs once at launch (which only ever speaks up when an
+  // update actually exists). This one always tells the user something:
+  // the update dialog if one's published for this platform, or a "you're
+  // current" snackbar if not. `force: true` bypasses LicenseService's warm
+  // cache so an admin who just published a new version a moment ago shows
+  // up here immediately instead of waiting for next app restart.
+  Future<void> _checkForUpdate() async {
+    if (widget.license == null || _checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    await maybeShowUpdate(context, widget.license!, force: true, announceIfCurrent: true);
+    if (mounted) setState(() => _checkingUpdate = false);
   }
 
   void _openSecurity() {
@@ -196,6 +215,17 @@ class _ProfileTabState extends State<ProfileTab> {
                 _settingsRow(Icons.tune, AppColors.tileIndigo, 'Advanced Settings', 'Home layout, resume, auto-next and live format.', _openAdvancedSettings),
                 const Divider(height: 1, color: AppColors.border, indent: 68),
                 _settingsRow(Icons.shield_outlined, AppColors.tileGreen, 'Security', 'Lock the app behind a passcode.', _openSecurity),
+                if (widget.license != null) ...[
+                  const Divider(height: 1, color: AppColors.border, indent: 68),
+                  _settingsRow(
+                    Icons.system_update_alt,
+                    AppColors.tilePurple,
+                    'Check for Update',
+                    'See if a newer version of the app is available.',
+                    _checkForUpdate,
+                    trailing: _checkingUpdate ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null,
+                  ),
+                ],
                 const Divider(height: 1, color: AppColors.border, indent: 68),
                 _settingsRow(Icons.logout, AppColors.tileRed, 'Logout', 'Sign out of this playlist on your device.', _logout, danger: true),
               ],
@@ -248,7 +278,7 @@ class _ProfileTabState extends State<ProfileTab> {
     );
   }
 
-  Widget _settingsRow(IconData icon, Color color, String title, String subtitle, VoidCallback onTap, {bool danger = false}) {
+  Widget _settingsRow(IconData icon, Color color, String title, String subtitle, VoidCallback onTap, {bool danger = false, Widget? trailing}) {
     return ListTile(
       leading: Container(
         width: 40, height: 40,
@@ -257,7 +287,7 @@ class _ProfileTabState extends State<ProfileTab> {
       ),
       title: Text(title, style: TextStyle(color: danger ? AppColors.danger : AppColors.text, fontWeight: FontWeight.w600, fontSize: 14)),
       subtitle: Text(subtitle, style: const TextStyle(color: AppColors.textDim, fontSize: 11)),
-      trailing: danger ? null : const Icon(Icons.chevron_right, color: AppColors.textDim),
+      trailing: trailing ?? (danger ? null : const Icon(Icons.chevron_right, color: AppColors.textDim)),
       onTap: onTap,
     );
   }

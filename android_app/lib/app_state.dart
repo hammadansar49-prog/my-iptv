@@ -1,10 +1,26 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart' hide Category;
+import 'package:flutter/widgets.dart' show GlobalKey;
 import 'package:path_provider/path_provider.dart';
 import 'downloads.dart';
 import 'models.dart';
 import 'storage.dart';
 import 'xtream_client.dart';
+
+/// One request to show the player, kept alive at the app root (see
+/// [AppState.playerLaunch]) instead of being pushed as a Navigator route.
+/// `playerKey` is created once per launch and reused for every rebuild of
+/// that same launch (mini <-> full toggles) so Flutter keeps the same
+/// State/Player alive across the toggle instead of tearing it down and
+/// reconnecting — that reconnect-on-resize is exactly the "loading again"
+/// bug this was built to fix.
+class PlayerLaunch {
+  final PlayRequest request;
+  final String? favSection;
+  final PlayableItem? favItem;
+  final GlobalKey playerKey = GlobalKey();
+  PlayerLaunch({required this.request, this.favSection, this.favItem});
+}
 
 class AppState extends ChangeNotifier {
   Account? activeAccount;
@@ -156,10 +172,11 @@ class AppState extends ChangeNotifier {
         : section == 'movies'
             ? await c.getVodStreams(categoryId, force: force)
             : await c.getSeries(categoryId, force: force);
+    final sorted = section == 'live' ? list : sortByRecency(list, section);
     // An empty list is not remembered: that's what a failed or cut-off
     // answer looks like, and keeping it showed "0 items" until a restart.
-    if (list.isNotEmpty) itemCache[key] = list;
-    return list;
+    if (sorted.isNotEmpty) itemCache[key] = sorted;
+    return sorted;
   }
 
   Future<List<Category>> sectionCategories(String section) async {
@@ -227,6 +244,28 @@ class AppState extends ChangeNotifier {
     }
     await Storage.saveFavorites(favorites);
     notifyListeners();
+  }
+
+  // ---- Player launch / mini (floating PiP) ----
+  // Held here instead of being pushed as a Navigator route so the player can
+  // float above every screen (Home, EPG, Downloads, Profile, and anything
+  // pushed on top of them) and keep playing while the user browses elsewhere.
+  // See the `builder:` overlay in main.dart, which is what actually reads
+  // these two notifiers and mounts PlayerScreen.
+  final ValueNotifier<PlayerLaunch?> playerLaunch = ValueNotifier(null);
+  final ValueNotifier<bool> playerMini = ValueNotifier(false);
+
+  void launchPlayer(PlayRequest request, {String? favSection, PlayableItem? favItem}) {
+    playerMini.value = false;
+    playerLaunch.value = PlayerLaunch(request: request, favSection: favSection, favItem: favItem);
+  }
+
+  void minimizePlayer() => playerMini.value = true;
+  void expandPlayer() => playerMini.value = false;
+
+  void closePlayer() {
+    playerLaunch.value = null;
+    playerMini.value = false;
   }
 }
 

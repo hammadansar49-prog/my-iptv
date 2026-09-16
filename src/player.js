@@ -133,6 +133,7 @@ class PlayerController {
 
   _onReady() {
     this._dataReceived = true;
+    this._liveReloadAttempts = 0;
     this._clearStallTimer();
     this._startFpsLoop();
     this._notify('playing');
@@ -163,31 +164,64 @@ class PlayerController {
     if (!this.isLive) return;
     let lastTime = -1;
     let stuckTicks = 0;
-    let nudged = false;
+    let starvedTicks = 0;
+    const reload = (why) => {
+      // A one-connection provider needs a moment to actually let go of the
+      // connection this reconnect attempt just tore down — reconnecting
+      // instantly (as this used to) can ask for a new one before the old
+      // slot is released server-side, so the new attempt gets refused too,
+      // which looked identical to the original stall ("still loading")
+      // except now it repeated forever every ~10s instead of just once.
+      // Backing off a little more on each consecutive failed reconnect (reset
+      // the moment a reconnect actually gets data again, in _onReady) gives
+      // the provider time to catch up instead of racing it.
+      this._liveReloadAttempts = (this._liveReloadAttempts || 0) + 1;
+      const delay = Math.min(6000, 1200 * this._liveReloadAttempts);
+      console.log(`[player] ${why} — reloading channel in ${delay}ms (attempt ${this._liveReloadAttempts})`);
+      this._clearFreezeWatchdog();
+      this._notify('buffering', 'Reconnecting...');
+      const url = this._originalUrl;
+      this._teardownEngines();
+      setTimeout(() => {
+        if (token !== this._playToken) return;
+        this._playDirect(url, token);
+      }, delay);
+    };
     this._freezeWatchdog = setInterval(() => {
       if (token !== this._playToken || this.video.paused || this.video.seeking) {
-        stuckTicks = 0; nudged = false; lastTime = this.video.currentTime;
+        stuckTicks = 0; starvedTicks = 0; lastTime = this.video.currentTime;
         return;
       }
       const hasBufferAhead = Array.from({ length: this.video.buffered.length }, (_, i) => i)
         .some((i) => this.video.buffered.end(i) - this.video.currentTime > 0.5);
       const t = this.video.currentTime;
-      if (t > lastTime + 0.05 || !hasBufferAhead) {
-        stuckTicks = 0; nudged = false; lastTime = t;
+      if (t > lastTime + 0.05) {
+        stuckTicks = 0; starvedTicks = 0; lastTime = t;
         return;
       }
+      lastTime = t;
+      if (!hasBufferAhead) {
+        // Not the same thing as a decoder stuck on a full buffer (below) —
+        // here nothing is arriving at all, so nudging currentTime has
+        // nothing to nudge into and never helped. That used to reset the
+        // stuck-tick counter to 0 every single tick (treated as "just
+        // buffering, leave it alone"), so a connection that truly stopped
+        // delivering data was left spinning on "Loading..." forever with no
+        // way back except the user manually pausing and pressing play again.
+        // Its own longer counter now forces the same reconnect once it's
+        // clearly not a brief, normal buffering pause.
+        stuckTicks = 0;
+        starvedTicks++;
+        if (starvedTicks >= 10) { starvedTicks = 0; reload('live playback starved (no incoming data)'); }
+        return;
+      }
+      starvedTicks = 0;
       stuckTicks++;
       if (stuckTicks === 3) {
         console.log('[player] live playback frozen — nudging');
         try { this.video.currentTime = t + 0.2; } catch {}
-        nudged = true;
       } else if (stuckTicks >= 6) {
-        console.log('[player] live playback still frozen after nudge — reloading channel');
-        this._clearFreezeWatchdog();
-        this._notify('buffering', 'Reconnecting...');
-        const url = this._originalUrl;
-        this._teardownEngines();
-        this._playDirect(url, token);
+        reload('live playback still frozen after nudge');
       }
     }, 1000);
   }
@@ -279,6 +313,7 @@ class PlayerController {
     this._startAt = !isLive && startAt > 0 ? startAt : 0;
     this._lastMode = 'copy';
     this._baseMode = 'copy';
+    this._liveReloadAttempts = 0;
     this._sourceHeight = 0;
     this._probeResult = null;
     this._audioIndex = 0;
@@ -424,6 +459,7 @@ class PlayerController {
 
   _playDirect(url, token) {
     this._stage = 'direct';
+    this._directStartedAt = Date.now();
     const lower = url.split('?')[0].toLowerCase();
 
     if (lower.endsWith('.m3u8')) {
@@ -631,6 +667,19 @@ class PlayerController {
     const token = this._playToken;
     const err = this.video.error;
 
+    // hls.js briefly touches the video element while attachMedia()/loadSource()
+    // are still wiring things up (before it has a real MediaSource attached),
+    // and that transient state alone can fire a native `error` event with no
+    // MediaError at all (err=null) — completely harmless, hls.js recovers on
+    // its own a moment later. Without this guard every single live channel
+    // was treating that as a genuine failure and immediately abandoning the
+    // fast native/hls.js path for the ffmpeg proxy, which always works but is
+    // much slower to start — every channel paid that penalty on every play,
+    // not just channels that were actually having trouble.
+    if (this._stage === 'direct' && !err && !this._mse && Date.now() - (this._directStartedAt || 0) < 1500) {
+      return;
+    }
+
     // Under MediaSource the element itself isn't fetching anything.
     if (this._mse) {
       if (err) {
@@ -689,7 +738,18 @@ class PlayerController {
       this.video.removeAttribute('src');
       this.video.load();
       if (message) this._notify('buffering', message);
-      this._playProxy(this._originalUrl, token, 'copy', this._startAt);
+      // Same one-connection hand-off gap as _armAudioWatchdog below: the
+      // provider account can take a moment to notice hls.js/mpegts.js let go
+      // of its connection. Asking for the proxy's connection immediately
+      // sometimes got refused — which, for a live channel, meant the single
+      // permitted proxy attempt failed for timing reasons having nothing to
+      // do with the channel, and it was reported dead ("channel unavailable")
+      // even though it plays fine everywhere else (confirmed against the
+      // Android app, which connects directly with no proxy hand-off at all).
+      setTimeout(() => {
+        if (token !== this._playToken) return;
+        this._playProxy(this._originalUrl, token, 'copy', this._startAt);
+      }, 700);
     } else if ((this._stage === 'proxy-copy' || skipCopy) && !this.isLive) {
       this._playProxy(this._originalUrl, token, 'audiofix', 0);
     } else if (this._stage === 'proxy-audiofix') {

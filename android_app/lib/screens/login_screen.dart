@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../app_state.dart';
+import '../license.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../xtream_client.dart';
@@ -7,7 +8,8 @@ import 'main_shell.dart';
 
 class LoginScreen extends StatefulWidget {
   final AppState state;
-  const LoginScreen({super.key, required this.state});
+  final LicenseService? license;
+  const LoginScreen({super.key, required this.state, this.license});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -40,7 +42,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       await widget.state.login(acc);
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => MainShell(state: widget.state)),
+        MaterialPageRoute(builder: (_) => MainShell(state: widget.state, license: widget.license)),
       );
     } on XtreamException catch (e) {
       setState(() => error = e.message);

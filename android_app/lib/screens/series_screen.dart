@@ -4,7 +4,6 @@ import '../artwork.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../xtream_client.dart';
-import 'player_screen.dart';
 
 class SeriesScreen extends StatefulWidget {
   final AppState state;
@@ -140,7 +139,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
       if (eps.isEmpty) return;
       final req = _episodeRequest(eps.first, firstSeason, eps, 0, const []);
       if (resumeAt == 0) req.resumeAt = 0;
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(state: widget.state, request: req)));
+      widget.state.launchPlayer(req);
     }
 
     void resumeLastWatched() {
@@ -148,7 +147,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
         url: lastWatched!.url, isLive: false, type: 'episode', title: lastWatched.title, subtitle: lastWatched.subtitle,
         thumb: lastWatched.thumb, historyKey: lastWatched.key, resumeAt: lastWatched.resumeAt,
       );
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(state: widget.state, request: req)));
+      widget.state.launchPlayer(req);
     }
 
     return Column(
@@ -166,29 +165,36 @@ class _SeriesScreenState extends State<SeriesScreen> {
                   children: [
                     Text(plot, style: const TextStyle(fontSize: 12, color: AppColors.textDim), maxLines: 4, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: canResume ? resumeLastWatched : () => playFirstEpisode(),
-                          icon: const Icon(Icons.play_arrow, size: 16),
-                          label: Text(canResume ? 'Resume: Ep ${epNumMatch?.group(1) ?? ''}' : lastWatched != null ? 'Play Next' : 'Play', style: const TextStyle(fontSize: 12)),
-                          style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8)),
-                        ),
-                        if (canResume) ...[
-                          const SizedBox(width: 8),
-                          OutlinedButton.icon(
-                            onPressed: () => playFirstEpisode(resumeAt: 0),
-                            icon: const Icon(Icons.replay, size: 15),
-                            label: const Text('Start New', style: TextStyle(fontSize: 12)),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppColors.textDim,
-                              side: const BorderSide(color: AppColors.border),
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            ),
-                          ),
-                        ],
-                      ],
+                    // "Start New" used to sit beside "Resume" in a Row, which
+                    // overflowed off the right edge on narrower phones (the
+                    // series info column is already squeezed by the poster).
+                    // Stacking it directly under "Resume" instead means it
+                    // never has to compete for horizontal space.
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: canResume ? resumeLastWatched : () => playFirstEpisode(),
+                        icon: const Icon(Icons.play_arrow, size: 16),
+                        label: Text(canResume ? 'Resume: Ep ${epNumMatch?.group(1) ?? ''}' : lastWatched != null ? 'Play Next' : 'Play', style: const TextStyle(fontSize: 12)),
+                        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8)),
+                      ),
                     ),
+                    if (canResume) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => playFirstEpisode(resumeAt: 0),
+                          icon: const Icon(Icons.replay, size: 15),
+                          label: const Text('Start New', style: TextStyle(fontSize: 12)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.textDim,
+                            side: const BorderSide(color: AppColors.border),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -248,15 +254,8 @@ class _SeriesScreenState extends State<SeriesScreen> {
                   leading: Artwork(url: thumb, title: '', width: 80, radius: 6, placeholderIcon: Icons.movie_outlined),
                   title: Text('S$selectedSeason E${ep['episode_num']} - ${ep['title'] ?? ''}', style: const TextStyle(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
                   subtitle: epInfo['duration'] != null ? Text('${epInfo['duration']}', style: const TextStyle(fontSize: 11, color: AppColors.textDim)) : null,
-                  trailing: IconButton(
-                    icon: Icon(
-                      dl == null ? Icons.download_outlined : dl.status == 'completed' ? Icons.download_done : Icons.downloading,
-                      color: dl?.status == 'downloading' ? AppColors.accent : AppColors.textDim,
-                      size: 20,
-                    ),
-                    onPressed: () => _downloadOne(req),
-                  ),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(state: widget.state, request: req))),
+                  trailing: _downloadButton(dl, req),
+                  onTap: () => widget.state.launchPlayer(req),
                 ),
               );
             },
@@ -270,6 +269,54 @@ class _SeriesScreenState extends State<SeriesScreen> {
     final existing = widget.state.downloads.byUrl(req.url);
     if (existing != null) return;
     widget.state.downloads.add(url: req.url, title: req.title, subtitle: req.subtitle, type: 'episode', thumb: req.thumb);
+  }
+
+  // Live per-episode download control: a spinning progress ring with the
+  // percentage while it's actively downloading (tap to pause/stop it right
+  // here, no need to go to the Downloads tab), a plain outline before it's
+  // started, and a solid check once it's finished so it's obvious the
+  // episode is saved for offline playback.
+  Widget _downloadButton(DownloadItem? dl, PlayRequest req) {
+    if (dl == null) {
+      return IconButton(
+        icon: const Icon(Icons.download_outlined, color: AppColors.textDim, size: 20),
+        onPressed: () => _downloadOne(req),
+      );
+    }
+    if (dl.status == 'completed') {
+      return const Padding(
+        padding: EdgeInsets.all(8),
+        child: Icon(Icons.check_circle, color: AppColors.success, size: 22),
+      );
+    }
+    if (dl.status == 'downloading' || dl.status == 'queued' || dl.status == 'waiting') {
+      final pct = (dl.progress * 100).floor();
+      return GestureDetector(
+        onTap: () => widget.state.downloads.pause(dl.id),
+        child: SizedBox(
+          width: 34, height: 34,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              SizedBox(
+                width: 30, height: 30,
+                child: dl.status == 'downloading'
+                    ? CircularProgressIndicator(value: dl.progress > 0 ? dl.progress : null, strokeWidth: 2.5, color: AppColors.accent, backgroundColor: AppColors.bg3)
+                    : const CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.textDim, backgroundColor: AppColors.bg3),
+              ),
+              dl.status == 'downloading'
+                  ? Text('$pct', style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700))
+                  : const Icon(Icons.pause, size: 12, color: AppColors.textDim),
+            ],
+          ),
+        ),
+      );
+    }
+    // paused / failed
+    return IconButton(
+      icon: Icon(dl.status == 'failed' ? Icons.refresh : Icons.play_arrow, color: AppColors.accent, size: 20),
+      onPressed: () => widget.state.downloads.resume(dl.id),
+    );
   }
 
   void _downloadSeason(List<Map<String, dynamic>> episodes) {

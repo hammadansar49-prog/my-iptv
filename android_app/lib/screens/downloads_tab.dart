@@ -4,7 +4,6 @@ import '../artwork.dart';
 import '../downloads.dart';
 import '../models.dart';
 import '../theme.dart';
-import 'player_screen.dart';
 
 class DownloadsTab extends StatefulWidget {
   final AppState state;
@@ -30,14 +29,9 @@ class _DownloadsTabState extends State<DownloadsTab> {
   void _onChanged() { if (mounted) setState(() {}); }
 
   void _play(DownloadItem d) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => PlayerScreen(
-        state: widget.state,
-        request: PlayRequest(
-          url: d.filePath, isLive: false, type: d.type, title: d.title, subtitle: d.subtitle,
-          thumb: d.thumb, historyKey: 'download:${d.id}', local: true,
-        ),
-      ),
+    widget.state.launchPlayer(PlayRequest(
+      url: d.filePath, isLive: false, type: d.type, title: d.title, subtitle: d.subtitle,
+      thumb: d.thumb, historyKey: 'download:${d.id}', local: true,
     ));
   }
 

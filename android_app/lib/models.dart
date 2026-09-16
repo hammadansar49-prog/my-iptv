@@ -78,6 +78,42 @@ class PlayableItem {
       );
 }
 
+// Same rule as extractYear()/sortByRecency() in the PC app's renderer.js:
+// a 4-digit year found in the name wins; otherwise fall back to the
+// provider's own release_date (series) or added (VOD, epoch seconds).
+// Items with no detectable year sink to the bottom instead of cluttering the
+// top of Movies/Series with undated junk, without ever dropping an item.
+int? _extractYear(PlayableItem it, String section) {
+  final m = RegExp(r'(19|20)\d{2}').firstMatch(it.name);
+  if (m != null) return int.parse(m.group(0)!);
+  if (section == 'series') {
+    final rd = it.raw['release_date']?.toString();
+    if (rd != null && rd.length >= 4) {
+      final y = int.tryParse(rd.substring(0, 4));
+      if (y != null) return y;
+    }
+  } else {
+    final added = it.raw['added'];
+    final ts = added == null ? null : int.tryParse(added.toString());
+    if (ts != null && ts > 0) return DateTime.fromMillisecondsSinceEpoch(ts * 1000).year;
+  }
+  return null;
+}
+
+List<PlayableItem> sortByRecency(List<PlayableItem> items, String section) {
+  final indexed = items.asMap().entries.toList()
+    ..sort((a, b) {
+      final ya = _extractYear(a.value, section);
+      final yb = _extractYear(b.value, section);
+      if (ya == null && yb == null) return a.key.compareTo(b.key);
+      if (ya == null) return 1;
+      if (yb == null) return -1;
+      if (ya != yb) return yb.compareTo(ya);
+      return a.key.compareTo(b.key);
+    });
+  return indexed.map((e) => e.value).toList();
+}
+
 class Category {
   final String id;
   final String name;

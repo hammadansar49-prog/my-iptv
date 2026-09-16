@@ -20,6 +20,7 @@ class AppColors {
   static const tileIndigo = Color(0xFF6D78F2);
   static const tileGreen = Color(0xFF4CC46A);
   static const tileRed = Color(0xFFE5383B);
+  static const tilePurple = Color(0xFF9B6DF2);
 }
 
 ThemeData buildAppTheme() {

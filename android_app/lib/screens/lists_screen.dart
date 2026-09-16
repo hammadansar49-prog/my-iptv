@@ -3,7 +3,6 @@ import '../app_state.dart';
 import '../artwork.dart';
 import '../models.dart';
 import '../theme.dart';
-import 'player_screen.dart';
 import 'series_screen.dart';
 import 'live_tv_screen.dart';
 
@@ -79,7 +78,7 @@ class _ListsScreenState extends State<ListsScreen> {
                 url: h.url, isLive: h.isLive, type: h.type, title: h.title, subtitle: h.subtitle,
                 thumb: h.thumb, historyKey: h.key, resumeAt: h.resumeAt,
               );
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(state: widget.state, request: req)));
+              widget.state.launchPlayer(req);
             },
           ),
         );
@@ -138,8 +137,6 @@ class _ListsScreenState extends State<ListsScreen> {
     );
     final existing = widget.state.findHistory(req.historyKey);
     if (existing != null) req.resumeAt = existing.resumeAt;
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => PlayerScreen(state: widget.state, request: req, favSection: f.section, favItem: f.item),
-    ));
+    widget.state.launchPlayer(req, favSection: f.section, favItem: f.item);
   }
 }

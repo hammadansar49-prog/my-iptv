@@ -545,6 +545,13 @@ ipcMain.handle('update:check', async () => {
     const data = await rtdbRequest('GET', '/iptv/update');
     const currentVersion = app.getVersion();
     if (!data || !data.version) return { ok: true, available: false, currentVersion };
+    // The Android app reads this same node now — the admin panel sets a
+    // `platform` field ("pc", "android", or "all") per entry so one update
+    // can target either app without falsely flagging the other. Missing
+    // field (entries written before this existed) defaults to "pc" so old
+    // behavior is unchanged.
+    const platform = data.platform || 'pc';
+    if (platform !== 'pc' && platform !== 'all') return { ok: true, available: false, currentVersion };
     const available = compareVersions(data.version, currentVersion) > 0;
     return {
       ok: true,

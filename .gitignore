@@ -4,3 +4,4 @@ release/
 run-pid.txt
 package-lock.json
 vendor/
+.idea/
