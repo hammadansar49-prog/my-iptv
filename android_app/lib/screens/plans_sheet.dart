@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../license.dart';
+import '../license_key_formatter.dart';
 import '../theme.dart';
 
 /// The "Get Plans" paywall — same purpose as the license gate's "See Plans",
@@ -11,7 +12,20 @@ import '../theme.dart';
 /// one big call-to-action at the bottom. Opened by tapping the PRO badge, and
 /// (see maybeShowExpiryPaywall in main_shell.dart) automatically on launch
 /// during a plan's last 3 days.
+// Debounced the same way as AppState.launchPlayer: a fast double-tap on the
+// PRO badge / "See Plans" button used to push this screen twice in the same
+// frame, stacking two PaywallScreens (the second's own network calls firing
+// against a route that was about to be covered) — on some devices that
+// showed as the app crashing right on the plans screen. A single tap still
+// opens instantly; a second tap within the window is dropped.
+DateTime? _lastPlansOpen;
+
 Future<void> showPlansSheet(BuildContext context, LicenseService license) {
+  final now = DateTime.now();
+  if (_lastPlansOpen != null && now.difference(_lastPlansOpen!) < const Duration(milliseconds: 800)) {
+    return Future.value();
+  }
+  _lastPlansOpen = now;
   return Navigator.of(context).push(MaterialPageRoute(
     fullscreenDialog: true,
     builder: (_) => PaywallScreen(license: license),
@@ -121,7 +135,13 @@ class _PaywallScreenState extends State<PaywallScreen> {
       builder: (_) => AlertDialog(
         backgroundColor: AppColors.bg2,
         title: const Text('Enter license key'),
-        content: TextField(controller: controller, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(hintText: 'License key')),
+        content: TextField(
+          controller: controller,
+          textCapitalization: TextCapitalization.characters,
+          inputFormatters: [LicenseKeyFormatter()],
+          style: const TextStyle(letterSpacing: 1.2, fontWeight: FontWeight.w600),
+          decoration: const InputDecoration(hintText: 'MYIPTV-XXXXXX-XXXXXX-XXXXXX'),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
@@ -145,6 +165,30 @@ class _PaywallScreenState extends State<PaywallScreen> {
     );
   }
 
+  // Shared by the X button and the hardware back button, so both do exactly
+  // the same thing — a plain Navigator.pop() looked like it "did nothing"
+  // when tapped during the initial network load below, because the X button
+  // used to only exist in the tree once loading finished; on a slow
+  // connection that could be the better part of a minute with no way out.
+  void _close() {
+    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+  }
+
+  Widget _closeButton() {
+    return Positioned(
+      top: 44,
+      right: 14,
+      child: IconButton(
+        icon: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+          child: const Icon(Icons.close, color: Colors.white),
+        ),
+        onPressed: _close,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final status = widget.license.localStatus();
@@ -153,10 +197,13 @@ class _PaywallScreenState extends State<PaywallScreen> {
     final trialOn = trial != null && trial['available'] == true;
     final trialHours = trialOn ? ((trial['config'] as Map?)?['durationHours'] as int? ?? 24) : 0;
 
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {},
+      child: Scaffold(
       backgroundColor: AppColors.bg,
       body: loading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
+          ? Stack(children: [const Center(child: CircularProgressIndicator(color: AppColors.accent)), _closeButton()])
           : Stack(
               children: [
                 SingleChildScrollView(
@@ -198,17 +245,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     ],
                   ),
                 ),
-                Positioned(
-                  top: 44, right: 14,
-                  child: IconButton(
-                    icon: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                      child: const Icon(Icons.close, color: Colors.white),
-                    ),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ),
+                _closeButton(),
                 Positioned(
                   left: 0, right: 0, bottom: 0,
                   child: Container(
@@ -247,6 +284,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                 ),
               ],
             ),
+      ),
     );
   }
 

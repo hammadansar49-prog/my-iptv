@@ -120,7 +120,15 @@ class _ListsScreenState extends State<ListsScreen> {
     );
   }
 
+  // Same fast-double-tap guard as HomeTab._openItem — a favorite card tapped
+  // twice quickly used to stack two Navigator pushes (series/live) or race
+  // two launchPlayer calls.
+  DateTime? _lastOpenFavorite;
+
   void _openFavorite(FavoriteEntry f) {
+    final now = DateTime.now();
+    if (_lastOpenFavorite != null && now.difference(_lastOpenFavorite!) < const Duration(milliseconds: 800)) return;
+    _lastOpenFavorite = now;
     if (f.section == 'series') {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => SeriesScreen(state: widget.state, series: f.item)));
       return;

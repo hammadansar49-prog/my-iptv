@@ -1,14 +1,31 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'app_state.dart';
 import 'license.dart';
+import 'notifications.dart';
 import 'theme.dart';
+import 'screens/announcement_dialog.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_shell.dart';
 import 'screens/lock_screen.dart';
 import 'screens/license_gate_screen.dart';
 import 'widgets/floating_player.dart';
+
+// Lets a tapped announcement notification reach the same dialog the app
+// already shows on launch/live-push, even from a cold start — the
+// notification tap callback in AppNotifications.init runs before MainShell
+// (or any screen) necessarily exists yet, so it needs a route to a
+// BuildContext that's independent of whatever's currently on screen.
+final rootNavigatorKey = GlobalKey<NavigatorState>();
+
+Future<void> _ensureBatteryExemption() async {
+  try {
+    if (await Permission.ignoreBatteryOptimizations.isGranted) return;
+    await Permission.ignoreBatteryOptimizations.request();
+  } catch (_) {}
+}
 
 void main() {
   // Required once, before any Player is created — sets up the bundled
@@ -67,8 +84,38 @@ class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
     // That stacking (update check -> announcement -> paywall, each awaited
     // in sequence in main_shell.dart) was the actual ~1 minute wait.
     unawaited(license.warmUp());
+    license.startLiveUpdates();
+    // Requests the notification permission right away rather than waiting
+    // for the first announcement to exist — matches "ask when the app
+    // opens" rather than "ask the first time it's actually needed".
+    unawaited(AppNotifications.init(onTapped: () {
+      final ctx = rootNavigatorKey.currentContext;
+      if (ctx != null) maybeShowAnnouncement(ctx, license);
+    }));
     await appState.init();
+    // Same reasoning as the notification permission above, moved here from
+    // "first download click" — asking while a movie is playing full-screen
+    // popped a system dialog over the immersive video surface and left it
+    // stuck on a white frame (audio kept playing underneath).
+    unawaited(appState.downloads.ensureStoragePermission());
+    // Same reasoning and same "ask once at boot, never mid-playback" rule as
+    // the storage/notification prompts above — see the AndroidManifest.xml
+    // comment on REQUEST_IGNORE_BATTERY_OPTIMIZATIONS for why this exists:
+    // some OEM skins (found on a ColorOS/Oppo device) freeze the app's
+    // process for a few seconds under normal background-management
+    // heuristics, and if that freeze lands mid-gesture (e.g. tapping a movie
+    // to play it) Android's own ANR watchdog can't tell the freeze apart
+    // from a real hang and kills the app. Being on the OS's exemption list
+    // is the standard mitigation. A no-op if already granted or the device
+    // doesn't support it.
+    unawaited(_ensureBatteryExemption());
     await appState.tryAutoLogin();
+    // A reinstall wipes local storage, so a still-running trial needs to be
+    // handed back from its RTDB record (see restoreTrialIfAny) before
+    // deciding whether to show the license gate — otherwise a mid-trial
+    // reinstall locked the user out with no trial offered (checkTrialAvailability
+    // correctly refuses a second one) and no way back in either.
+    await license.restoreTrialIfAny();
     final status = license.localStatus();
     setState(() {
       ready = true;
@@ -103,6 +150,7 @@ class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: rootNavigatorKey,
       title: 'MY IPTV',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),

@@ -248,7 +248,18 @@ class _HomeTabState extends State<HomeTab> {
     );
   }
 
+  // Debounced against a fast double-tap on a grid card: each branch pushes
+  // a route or (for movies) reaches AppState.launchPlayer, and a rapid
+  // second tap used to fire this whole method again before the first push
+  // had registered, stacking two routes or — worse — two player launches
+  // racing to construct/dispose the native player. A single tap still opens
+  // instantly; a second tap within the window is dropped.
+  DateTime? _lastOpenItem;
+
   Future<void> _openItem(PlayableItem it) async {
+    final now = DateTime.now();
+    if (_lastOpenItem != null && now.difference(_lastOpenItem!) < const Duration(milliseconds: 800)) return;
+    _lastOpenItem = now;
     final client = widget.state.client!;
     if (section == 'live') {
       // Live channels open the way YouTube plays a video: inline at the top
@@ -330,11 +341,17 @@ class _HomeTabState extends State<HomeTab> {
   Widget _buildProBadge() {
     final status = widget.license!.localStatus();
     if (!status.valid) return const SizedBox.shrink();
-    final daysLeft = ((status.expiresAt - DateTime.now().millisecondsSinceEpoch) / 86400000).ceil();
+    final msLeft = status.expiresAt - DateTime.now().millisecondsSinceEpoch;
+    final daysLeft = (msLeft / 86400000).ceil();
     final warn = daysLeft <= 7;
+    // On the actual last day, "1d left" doesn't tell the user how much of
+    // that day is actually left — could be 23 hours or 20 minutes. Once
+    // there's under 24h on the clock, count down in hours instead so it
+    // reads "23h", "2h", etc. right up to expiry.
+    final timeLabel = msLeft < 86400000 ? '${(msLeft / 3600000).ceil().clamp(1, 23)}h' : '${daysLeft}d';
     final label = status.isTrial
-        ? (warn ? 'TRIAL · ${daysLeft}d' : 'TRIAL')
-        : (warn ? 'PRO · ${daysLeft}d' : 'PRO');
+        ? (warn ? 'TRIAL · $timeLabel' : 'TRIAL')
+        : (warn ? 'PRO · $timeLabel' : 'PRO');
     final color = warn ? const Color(0xFFEF4444) : AppColors.accent;
     return Padding(
       padding: const EdgeInsets.only(right: 8),

@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../license.dart';
+import '../notifications.dart';
 import '../storage.dart';
 import '../theme.dart';
 
@@ -15,6 +17,21 @@ Future<void> maybeShowAnnouncement(BuildContext context, LicenseService license)
   final createdAt = (data['created_at'] as num?)?.toInt() ?? 0;
   final dismissedAt = Storage.p.getInt('announcementDismissed') ?? 0;
   if (createdAt != 0 && createdAt == dismissedAt) return;
+
+  // System notification, separate from the in-app dialog below — this
+  // function gets called more than once for the same still-undismissed
+  // announcement (launch check, live SSE push, a reconnect resending
+  // unchanged data), but the notification itself should only fire once per
+  // announcement, tracked by createdAt the same way dismissal is.
+  final notifiedAt = Storage.p.getInt('announcementNotified') ?? 0;
+  if (createdAt != 0 && createdAt != notifiedAt) {
+    await Storage.p.setInt('announcementNotified', createdAt);
+    unawaited(AppNotifications.showAnnouncement(
+      data['title']?.toString().isNotEmpty == true ? data['title'].toString() : 'MY IPTV',
+      data['text'].toString(),
+    ));
+  }
+
   if (!context.mounted) return;
 
   final collectFeedback = data['collect_feedback'] == true;

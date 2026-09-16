@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../license.dart';
+import '../license_key_formatter.dart';
 import '../theme.dart';
 
 /// Blocks the app the same way `view-license` blocks `boot()` on PC: nothing
@@ -124,8 +125,9 @@ class _LicenseGateScreenState extends State<LicenseGateScreen> {
               controller: _controller,
               textAlign: TextAlign.center,
               textCapitalization: TextCapitalization.characters,
-              style: const TextStyle(letterSpacing: 1.2),
-              decoration: const InputDecoration(hintText: 'License key'),
+              inputFormatters: [LicenseKeyFormatter()],
+              style: const TextStyle(letterSpacing: 1.5, fontFeatures: [FontFeature.tabularFigures()], fontWeight: FontWeight.w600),
+              decoration: const InputDecoration(hintText: 'MYIPTV-XXXXXX-XXXXXX-XXXXXX'),
               onSubmitted: (_) => _verify(),
             ),
             if (_error != null) ...[

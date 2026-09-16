@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'storage.dart';
 import 'models.dart';
 
@@ -122,6 +123,28 @@ class DownloadManager extends ChangeNotifier {
   }
 
   // ---- actions ----
+
+  bool _storagePermissionAsked = false;
+
+  // Downloads already land in this app's own scoped-storage folder, which
+  // needs no permission at all on modern Android — but the user explicitly
+  // wants the same "app asks before touching your files" prompt a
+  // professional app shows. This used to run lazily on the first download
+  // request, which could land while a movie was playing full-screen
+  // (download-while-watching is a real, supported flow) — the system
+  // permission dialog popping up over the immersive video surface is what
+  // was leaving a stuck white frame with audio still playing. Called once
+  // instead at app boot (main.dart), before any player screen exists.
+  // `Permission.storage.request()` resolves to already-granted on its own on
+  // Android 13+ where it no longer applies, so this is a no-op dialog-wise
+  // there.
+  Future<void> ensureStoragePermission() async {
+    if (_storagePermissionAsked) return;
+    _storagePermissionAsked = true;
+    try {
+      await Permission.storage.request();
+    } catch (_) {}
+  }
 
   Future<DownloadItem> add({
     required String url,

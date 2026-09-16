@@ -84,7 +84,55 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
     player.stream.track.listen((t) => mounted ? setState(() => currentTrack = t) : null);
     _errSub = player.stream.error.listen((msg) { if (mounted) _handleFailure(msg); });
     WakelockPlus.enable();
-    _open(current);
+    _beginPlayback();
+  }
+
+  bool _slotHeld = false;
+
+  // Same one-connection-at-a-time gate as the movie/episode player (see
+  // AppState.acquireProviderSlot) — a movie left minimized in its floating
+  // PiP box is a separate Player that can still be connected while this
+  // screen opens, and this account's provider only allows one connection at
+  // a time. Channel switches within this screen reuse this same held slot.
+  Future<void> _beginPlayback() async {
+    final ok = await _acquireProviderSlotOrTimeout();
+    if (!mounted) {
+      if (ok) widget.state.releaseProviderSlot();
+      return;
+    }
+    if (!ok) {
+      setState(() {
+        loading = false;
+        error = 'This account allows only one stream at a time. Close the other playing video, then try again.';
+      });
+      return;
+    }
+    _slotHeld = true;
+    await _open(current);
+  }
+
+  Future<bool> _acquireProviderSlotOrTimeout() async {
+    var timedOut = false;
+    final acquireFuture = widget.state.acquireProviderSlot().then((_) {
+      if (timedOut) {
+        widget.state.releaseProviderSlot();
+        return false;
+      }
+      return true;
+    });
+    return await Future.any([
+      acquireFuture,
+      Future.delayed(const Duration(seconds: 5), () { timedOut = true; return false; }),
+    ]);
+  }
+
+  void _retry() {
+    _retries = 0;
+    if (_slotHeld) {
+      _open(current);
+    } else {
+      _beginPlayback();
+    }
   }
 
   Future<void> _open(PlayableItem ch) async {
@@ -205,6 +253,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
     _errSub?.cancel();
     _expandCtrl.dispose();
     player.dispose();
+    if (_slotHeld) widget.state.releaseProviderSlot();
     WakelockPlus.disable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
@@ -382,7 +431,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
             const SizedBox(height: 10),
             Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 12)),
             const SizedBox(height: 12),
-            ElevatedButton(onPressed: () { _retries = 0; _open(current); }, child: const Text('Retry')),
+            ElevatedButton(onPressed: _retry, child: const Text('Retry')),
           ]),
         ),
       );

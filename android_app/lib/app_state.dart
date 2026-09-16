@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart' hide Category;
 import 'package:flutter/widgets.dart' show GlobalKey;
@@ -254,8 +255,20 @@ class AppState extends ChangeNotifier {
   // these two notifiers and mounts PlayerScreen.
   final ValueNotifier<PlayerLaunch?> playerLaunch = ValueNotifier(null);
   final ValueNotifier<bool> playerMini = ValueNotifier(false);
+  DateTime? _lastPlayerLaunch;
 
+  // Debounced against rapid double-taps: replacing playerLaunch.value tears
+  // down the old PlayerScreen (and its native media_kit Player) while the
+  // new one is still spinning one up. A fast double-tap on a movie/episode
+  // card used to fire this twice within the same frame or two, disposing a
+  // Player mid-construction — that's a native teardown race, not a catchable
+  // Dart exception, and it crashed the whole app on a real device. A single
+  // tap still launches instantly; only a second call within the window is
+  // dropped.
   void launchPlayer(PlayRequest request, {String? favSection, PlayableItem? favItem}) {
+    final now = DateTime.now();
+    if (_lastPlayerLaunch != null && now.difference(_lastPlayerLaunch!) < const Duration(milliseconds: 800)) return;
+    _lastPlayerLaunch = now;
     playerMini.value = false;
     playerLaunch.value = PlayerLaunch(request: request, favSection: favSection, favItem: favItem);
   }
@@ -266,6 +279,47 @@ class AppState extends ChangeNotifier {
   void closePlayer() {
     playerLaunch.value = null;
     playerMini.value = false;
+  }
+
+  // ---- Provider connection gate ----
+  // The Xtream account this app runs against allows exactly one simultaneous
+  // connection (same constraint documented in the PC app's CLAUDE.md under
+  // "One provider connection at a time", where a whole holdProvider/
+  // yieldProvider system exists for it). On Android there are two independent
+  // places that can hold that one connection: a movie/episode in
+  // PlayerScreen (which can be minimized to the floating PiP box and keeps
+  // playing/connected while the user browses elsewhere) and a live channel in
+  // LiveTvScreen (its own separate Player). Without serializing them, opening
+  // one while the other is still connected briefly holds two connections at
+  // once — the provider then stalls or refuses the second one, which showed
+  // up as a movie or channel simply never starting and the player stuck on a
+  // frozen, unresponsive frame instead of a clear error.
+  //
+  // Both PlayerScreen and LiveTvScreen must `await acquireProviderSlot()`
+  // once before their first `Player.open()` call and call
+  // `releaseProviderSlot()` exactly once from `dispose()`. Retries / auto-
+  // next-episode / channel switching reuse the same already-held slot and
+  // must NOT call this again — re-acquiring from the same holder would
+  // deadlock against itself.
+  Completer<void>? _providerHolder;
+
+  Future<void> acquireProviderSlot() async {
+    while (_providerHolder != null) {
+      await _providerHolder!.future;
+    }
+    _providerHolder = Completer<void>();
+  }
+
+  // Same ~700ms grace period the PC app waits before opening the next
+  // connection — asking immediately can get refused because the provider
+  // hasn't yet noticed the previous connection closed.
+  void releaseProviderSlot() {
+    final held = _providerHolder;
+    if (held == null) return;
+    Timer(const Duration(milliseconds: 700), () {
+      if (identical(_providerHolder, held)) _providerHolder = null;
+      if (!held.isCompleted) held.complete();
+    });
   }
 }
 

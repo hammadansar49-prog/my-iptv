@@ -120,8 +120,57 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _wireStreams();
     if (!request.isLive) widget.state.downloads.playbackStarted();
     widget.state.downloads.addListener(_onDownloadsChanged);
-    _startPlayback();
+    _beginPlayback();
     _armHideTimer();
+  }
+
+  bool _slotHeld = false;
+
+  // Waits for the one-connection-at-a-time gate (see
+  // AppState.acquireProviderSlot) before this screen's very first
+  // Player.open() — retries/auto-next-episode call `_startPlayback()`
+  // directly afterwards and reuse this same held slot. A 5s wait covers "the
+  // other player is just finishing closing"; past that we tell the user
+  // instead of leaving them on a spinner that never resolves.
+  Future<void> _beginPlayback() async {
+    final ok = await _acquireProviderSlotOrTimeout();
+    if (!mounted) {
+      if (ok) widget.state.releaseProviderSlot();
+      return;
+    }
+    if (!ok) {
+      setState(() {
+        loading = false;
+        error = 'This account allows only one stream at a time. Close the other playing video, then try again.';
+      });
+      return;
+    }
+    _slotHeld = true;
+    await _startPlayback();
+  }
+
+  Future<bool> _acquireProviderSlotOrTimeout() async {
+    var timedOut = false;
+    final acquireFuture = widget.state.acquireProviderSlot().then((_) {
+      if (timedOut) {
+        widget.state.releaseProviderSlot(); // gave up already — hand it straight back
+        return false;
+      }
+      return true;
+    });
+    return await Future.any([
+      acquireFuture,
+      Future.delayed(const Duration(seconds: 5), () { timedOut = true; return false; }),
+    ]);
+  }
+
+  void _retry() {
+    _retries = 0;
+    if (_slotHeld) {
+      _startPlayback();
+    } else {
+      _beginPlayback();
+    }
   }
 
   @override
@@ -386,6 +435,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _bufferingSub?.cancel();
     widget.state.downloads.removeListener(_onDownloadsChanged);
     player.dispose();
+    if (_slotHeld) widget.state.releaseProviderSlot();
     WakelockPlus.disable();
     if (!widget.request.isLive) widget.state.downloads.playbackEnded();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -656,7 +706,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             const SizedBox(height: 12),
             Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)),
             const SizedBox(height: 16),
-            ElevatedButton(onPressed: () { _retries = 0; _startPlayback(); }, child: const Text('Retry')),
+            ElevatedButton(onPressed: _retry, child: const Text('Retry')),
           ],
         ),
       );

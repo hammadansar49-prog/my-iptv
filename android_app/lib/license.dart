@@ -102,6 +102,84 @@ class LicenseService {
     ]);
   }
 
+  // ---- live push: same trick as subscribeRtdbSSE in the PC app's main.js
+  // ("an admin edit shows up while the screen is still open") — an open SSE
+  // connection per node so a new announcement or a freshly published update
+  // reaches this app the instant it's published, instead of only being
+  // picked up the next time the app is cold-started. On any 'put'/'patch'
+  // event from Firebase the node is just refetched (simplest correct thing;
+  // no attempt to apply the patch locally) and the warm cache above is
+  // refreshed — callers hear about it through the two broadcast streams
+  // below.
+  final _announcementUpdates = StreamController<Map<String, dynamic>?>.broadcast();
+  final _updateUpdates = StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>?> get announcementUpdates => _announcementUpdates.stream;
+  Stream<Map<String, dynamic>> get updateUpdates => _updateUpdates.stream;
+  bool _liveStarted = false;
+
+  void startLiveUpdates() {
+    if (_liveStarted) return;
+    _liveStarted = true;
+    _watchSse('/iptv/announcement', () async {
+      final data = await getAnnouncement(force: true);
+      if (!_announcementUpdates.isClosed) _announcementUpdates.add(data);
+    });
+    _watchSse('/iptv/update', () async {
+      final data = await checkForUpdate(force: true);
+      if (!_updateUpdates.isClosed) _updateUpdates.add(data);
+    });
+  }
+
+  void stopLiveUpdates() {
+    _liveStarted = false;
+    _sseCancelled = true;
+  }
+
+  bool _sseCancelled = false;
+
+  // Runs forever (until stopLiveUpdates()) reopening the SSE connection
+  // whenever it drops — a stalled connection, the app going to the
+  // background, or Firebase's own periodic reconnect are all normal and
+  // expected here, not errors worth surfacing to the user. Backs off further
+  // on each consecutive failed attempt (capped at 60s) instead of a fixed 5s
+  // gap, so a device that genuinely can't reach RTDB for a while (offline,
+  // captive portal, backgrounded under Doze) doesn't sit there redialing
+  // every 5 seconds indefinitely.
+  Future<void> _watchSse(String path, Future<void> Function() onChange) async {
+    _sseCancelled = false;
+    var failures = 0;
+    while (!_sseCancelled) {
+      http.Client? client;
+      try {
+        client = http.Client();
+        final req = http.Request('GET', Uri.parse('$_rtdbUrl$path.json'));
+        req.headers['Accept'] = 'text/event-stream';
+        final res = await client.send(req);
+        failures = 0;
+        String? pendingEvent;
+        await for (final line in res.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+          if (_sseCancelled) break;
+          if (line.startsWith('event: ')) {
+            pendingEvent = line.substring(7).trim();
+          } else if (line.startsWith('data: ')) {
+            if (pendingEvent == 'put' || pendingEvent == 'patch') {
+              await onChange();
+            }
+            pendingEvent = null;
+          }
+        }
+      } catch (_) {
+        failures++;
+        // network blip / backgrounded app — just reconnect below.
+      } finally {
+        client?.close();
+      }
+      if (_sseCancelled) break;
+      final backoff = Duration(seconds: (5 * (failures == 0 ? 1 : failures)).clamp(5, 60));
+      await Future.delayed(backoff);
+    }
+  }
+
   // Includes the Android ID (survives app reinstall, unlike anything this
   // app itself stores — resets only on factory reset) so the free-trial
   // one-per-device rule keeps pointing at the same hash after a reinstall,
@@ -116,6 +194,33 @@ class LicenseService {
     final raw = 'android|$androidId|${Platform.operatingSystemVersion}';
     _machineId = sha256.convert(utf8.encode(raw)).toString();
     return _machineId!;
+  }
+
+  // A reinstall (or a fresh install right after uninstalling) wipes this
+  // app's own local storage — but iptv/trials/$machineId in RTDB is the
+  // actual source of truth for "has this device already used its trial",
+  // deliberately so a reinstall can't be used to grab a second one. That
+  // same record is what was missing on the OTHER side of this: nothing ever
+  // read it back to restore a trial that was genuinely still running, so a
+  // user who reinstalled mid-trial landed back on the license gate with no
+  // way in — checkTrialAvailability() correctly refused a new trial, but
+  // nothing ever handed the still-valid one back to them. Called once at
+  // boot (main.dart) before the license gate decides what to show; a no-op
+  // if a valid license is already stored locally.
+  Future<void> restoreTrialIfAny() async {
+    if (localStatus().valid) return;
+    try {
+      final mid = await machineId();
+      final row = await _rtdb('GET', '/iptv/trials/$mid', timeout: const Duration(seconds: 8));
+      if (row == null) return;
+      final map = Map<String, dynamic>.from(row);
+      final expiresAt = (map['expires_at'] as num?)?.toInt() ?? 0;
+      if (expiresAt > DateTime.now().millisecondsSinceEpoch) {
+        await _writeLocal({'isTrial': true, 'plan': 'Free Trial', 'expiresAt': expiresAt});
+      }
+    } catch (_) {
+      // offline right now — try again on the next boot.
+    }
   }
 
   Future<dynamic> _rtdb(String method, String path, {Map<String, dynamic>? body, Duration timeout = const Duration(seconds: 15)}) async {
@@ -331,7 +436,12 @@ class LicenseService {
   Future<String?> getWhatsAppNumber() async {
     try {
       final data = await _rtdb('GET', '/iptv/settings');
-      if (data is Map) return data['whatsapp_number']?.toString();
+      // Field is camelCase (`whatsappNumber`) — that's what the theottdeals
+      // admin panel (admin-iptv.js) writes and what the PC app's renderer.js
+      // reads. This used to look for `whatsapp_number` (snake_case), which
+      // never existed in the node, so this always returned null and "Get
+      // Package" silently failed to open WhatsApp on Android only.
+      if (data is Map) return data['whatsappNumber']?.toString();
       return null;
     } catch (_) {
       return null;
