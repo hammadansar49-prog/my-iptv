@@ -98,6 +98,11 @@ class _MainShellState extends State<MainShell> {
   // within 2s while already on Home is what actually exits the app — a
   // single back press on Home used to do nothing, no exit at all.
   void _handleBack() {
+    final nav = Navigator.of(context);
+    if (nav.canPop()) {
+      nav.pop();
+      return;
+    }
     if (tabIndex != 0) {
       setState(() => tabIndex = 0);
       return;

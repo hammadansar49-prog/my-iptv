@@ -44,7 +44,17 @@ class FloatingPlayer extends StatelessWidget {
                 pageBuilder: (context, animation, secondaryAnimation) => player,
               ),
             );
-            if (!mini) return Positioned.fill(child: wrapped);
+            if (!mini) {
+              return Positioned.fill(
+                child: PopScope(
+                  canPop: false,
+                  onPopInvokedWithResult: (didPop, _) {
+                    if (!didPop) state.closePlayer();
+                  },
+                  child: wrapped,
+                ),
+              );
+            }
             return _DraggableMini(
               onExpand: () { state.playerMini.value = false; },
               child: wrapped,

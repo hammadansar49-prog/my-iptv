@@ -73,16 +73,89 @@ class _SeriesScreenState extends State<SeriesScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(series.name)),
       body: loading
-          ? const Center(child: CircularProgressIndicator())
+          ? _buildLoadingSkeleton()
           : error != null
               ? Center(
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Text(error!, textAlign: TextAlign.center),
+                    const Icon(Icons.error_outline, color: AppColors.textDim, size: 40),
+                    const SizedBox(height: 12),
+                    Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.textDim)),
                     const SizedBox(height: 10),
                     ElevatedButton(onPressed: _load, child: const Text('Retry')),
                   ]),
                 )
               : _buildContent(),
+    );
+  }
+
+  Widget _buildLoadingSkeleton() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 90, height: 130,
+                decoration: BoxDecoration(color: AppColors.bg3, borderRadius: BorderRadius.circular(8)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _shimmerBox(height: 12, width: double.infinity),
+                    const SizedBox(height: 8),
+                    _shimmerBox(height: 12, width: 200),
+                    const SizedBox(height: 10),
+                    _shimmerBox(height: 36, width: double.infinity),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(children: [
+            _shimmerBox(height: 32, width: 100),
+            const SizedBox(width: 8),
+            _shimmerBox(height: 32, width: 100),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        ...List.generate(4, (i) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          child: Row(
+            children: [
+              Container(width: 80, height: 60, decoration: BoxDecoration(color: AppColors.bg3, borderRadius: BorderRadius.circular(6))),
+              const SizedBox(width: 10),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _shimmerBox(height: 12, width: 180),
+                  const SizedBox(height: 6),
+                  _shimmerBox(height: 10, width: 100),
+                ],
+              )),
+            ],
+          ),
+        )),
+      ],
+    );
+  }
+
+  Widget _shimmerBox({required double height, required double width}) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 800),
+      height: height,
+      width: width,
+      decoration: BoxDecoration(
+        color: AppColors.bg3.withValues(alpha: .6),
+        borderRadius: BorderRadius.circular(4),
+      ),
     );
   }
 

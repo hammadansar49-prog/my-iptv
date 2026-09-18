@@ -178,9 +178,38 @@ class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
         ],
       ),
       home: !ready
-          ? const Scaffold(
+          ? Scaffold(
               backgroundColor: AppColors.bg,
-              body: Center(child: CircularProgressIndicator(color: AppColors.accent)),
+              body: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [AppColors.bg, Color(0xFF1A1A2E)],
+                  ),
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 56, height: 56,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(colors: [AppColors.accent, AppColors.accent2]),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Text('M', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+                      ),
+                      const SizedBox(height: 20),
+                      const SizedBox(
+                        width: 28, height: 28,
+                        child: CircularProgressIndicator(color: AppColors.accent, strokeWidth: 2.5),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             )
           : !licensed
               ? LicenseGateScreen(license: license, onUnlocked: _onUnlocked)
