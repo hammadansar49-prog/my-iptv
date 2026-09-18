@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'app_state.dart';
 import 'license.dart';
 import 'notifications.dart';
@@ -19,13 +18,6 @@ import 'widgets/floating_player.dart';
 // (or any screen) necessarily exists yet, so it needs a route to a
 // BuildContext that's independent of whatever's currently on screen.
 final rootNavigatorKey = GlobalKey<NavigatorState>();
-
-Future<void> _ensureBatteryExemption() async {
-  try {
-    if (await Permission.ignoreBatteryOptimizations.isGranted) return;
-    await Permission.ignoreBatteryOptimizations.request();
-  } catch (_) {}
-}
 
 void main() {
   // Required once, before any Player is created — sets up the bundled
@@ -81,7 +73,6 @@ class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
   }
 
   Future<void> _boot() async {
-    unawaited(_ensureBatteryExemption());
     unawaited(license.warmUp());
     license.startLiveUpdates();
     unawaited(AppNotifications.init(onTapped: () {
@@ -94,6 +85,7 @@ class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
     // shouldn't stare at a spinner longer than this. Trial restore runs in
     // parallel so it doesn't add to the wait.
     await license.restoreTrialIfAny();
+    await license.restoreKeyIfAny();
     try {
       await appState.tryAutoLogin().timeout(const Duration(seconds: 5));
     } catch (_) {}

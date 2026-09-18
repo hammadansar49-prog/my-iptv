@@ -356,6 +356,57 @@ class LicenseService {
   // unauthenticated caller: unused -> active, and adding this device to
   // machine_ids up to max_devices) ----
 
+  // On activation, also write a reverse-lookup entry at
+  // iptv/devices/$machineId so that a reinstall on the SAME device can
+  // auto-restore the key without forcing the user to re-enter it (the key
+  // screen only shows if the key was revoked or expired). Cleaned up on
+  // revocation/expiry in recheckNow().
+  Future<void> _writeDeviceIndex(String key) async {
+    try {
+      final mid = await machineId();
+      await _rtdb('PUT', '/iptv/devices/$mid', body: {
+        'key': key,
+        'activatedAt': DateTime.now().millisecondsSinceEpoch,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _clearDeviceIndex() async {
+    try {
+      final mid = await machineId();
+      await _rtdb('PUT', '/iptv/devices/$mid', body: null);
+    } catch (_) {}
+  }
+
+  // Called at boot (main.dart) after restoreTrialIfAny(). If the device was
+  // previously activated on a key that's still valid, this restores it
+  // locally so the license gate is skipped — the user never has to re-enter
+  // the same key after a reinstall as long as the admin hasn't revoked it
+  // and the package hasn't expired.
+  Future<void> restoreKeyIfAny() async {
+    if (localStatus().valid) return;
+    try {
+      final mid = await machineId();
+      final idx = await _rtdb('GET', '/iptv/devices/$mid', timeout: const Duration(seconds: 8));
+      if (idx == null || idx is! Map) return;
+      final key = idx['key'] as String?;
+      if (key == null || key.isEmpty) return;
+      final row = await _rtdb('GET', '/iptv/keys/${Uri.encodeComponent(key)}', timeout: const Duration(seconds: 8));
+      if (row == null || row is! Map) { await _clearDeviceIndex(); return; }
+      final map = Map<String, dynamic>.from(row);
+      if (map['status'] == 'revoked') { await _clearDeviceIndex(); return; }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final expiresAt = (map['expires_at'] as num?)?.toInt() ?? 0;
+      if (expiresAt != 0 && expiresAt < now) { await _clearDeviceIndex(); return; }
+      final machineIds = Map<String, dynamic>.from(map['machine_ids'] ?? {});
+      if (machineIds[mid] != true) { await _clearDeviceIndex(); return; }
+      await _writeLocal({'key': key, 'plan': map['plan_label'], 'expiresAt': expiresAt, 'lastVerifiedAt': now});
+      startKeyWatcher();
+    } catch (_) {
+      // offline — will be caught on next boot.
+    }
+  }
+
   Future<Map<String, dynamic>> verifyKey(String key) async {
     final trimmed = key.trim();
     if (trimmed.isEmpty) return {'valid': false, 'reason': 'not-found'};
@@ -378,6 +429,7 @@ class LicenseService {
           'machine_ids/$mid': true,
         });
         await _writeLocal({'key': trimmed, 'plan': map['plan_label'], 'expiresAt': expiresAt, 'lastVerifiedAt': now});
+        unawaited(_writeDeviceIndex(trimmed));
         startKeyWatcher();
         return {'valid': true, 'plan': map['plan_label'], 'expiresAt': expiresAt};
       }
@@ -401,6 +453,7 @@ class LicenseService {
         'machine_ids/$mid': true,
       });
       await _writeLocal({'key': trimmed, 'plan': map['plan_label'], 'expiresAt': expiresAt, 'lastVerifiedAt': now});
+      unawaited(_writeDeviceIndex(trimmed));
       startKeyWatcher();
       return {'valid': true, 'plan': map['plan_label'], 'expiresAt': expiresAt};
     } catch (e) {
@@ -419,12 +472,13 @@ class LicenseService {
     if (key == null) return;
     try {
       final row = await _rtdb('GET', '/iptv/keys/${Uri.encodeComponent(key)}');
-      if (row == null) { await _writeLocal({...lic, 'expiresAt': 0}); return; }
+      if (row == null) { await _writeLocal({...lic, 'expiresAt': 0}); unawaited(_clearDeviceIndex()); return; }
       final map = Map<String, dynamic>.from(row);
       final now = DateTime.now().millisecondsSinceEpoch;
       final expiresAt = (map['expires_at'] as num?)?.toInt() ?? 0;
       if (map['status'] == 'revoked' || (expiresAt != 0 && expiresAt < now)) {
         await _writeLocal({...lic, 'expiresAt': 0});
+        unawaited(_clearDeviceIndex());
       } else {
         await _writeLocal({...lic, 'plan': map['plan_label'], 'expiresAt': expiresAt, 'lastVerifiedAt': now});
       }
