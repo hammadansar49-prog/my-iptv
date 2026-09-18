@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../app_state.dart';
 import '../artwork.dart';
 import '../downloads.dart';
@@ -29,6 +31,12 @@ class _DownloadsTabState extends State<DownloadsTab> {
   void _onChanged() { if (mounted) setState(() {}); }
 
   void _play(DownloadItem d) {
+    if (!File(d.filePath).existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File not found — it may have been moved or deleted.')),
+      );
+      return;
+    }
     widget.state.launchPlayer(PlayRequest(
       url: d.filePath, isLive: false, type: d.type, title: d.title, subtitle: d.subtitle,
       thumb: d.thumb, historyKey: 'download:${d.id}', local: true,
@@ -87,7 +95,15 @@ class _DownloadsTabState extends State<DownloadsTab> {
 
   Widget _row(DownloadItem d) {
     final running = d.status == 'downloading' || d.status == 'queued' || d.status == 'waiting';
-    return GestureDetector(
+    return Focus(
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent && (event.logicalKey == LogicalKeyboardKey.select || event.logicalKey == LogicalKeyboardKey.enter)) {
+          if (d.status == 'completed') _play(d);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
       onTap: d.status == 'completed' ? () => _play(d) : null,
       child: Container(
         padding: const EdgeInsets.all(10),
@@ -140,6 +156,7 @@ class _DownloadsTabState extends State<DownloadsTab> {
           ],
         ),
       ),
+    ),
     );
   }
 }

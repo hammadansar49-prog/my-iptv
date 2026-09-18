@@ -49,6 +49,8 @@ class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
   bool locked = false;
   bool licensed = false;
   Timer? _licenseRecheckTimer;
+  Timer? _expiryTimer;
+  StreamSubscription? _keyRevokedSub;
 
   @override
   void initState() {
@@ -61,6 +63,9 @@ class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _licenseRecheckTimer?.cancel();
+    _expiryTimer?.cancel();
+    _keyRevokedSub?.cancel();
+    appState.dispose();
     super.dispose();
   }
 
@@ -76,54 +81,37 @@ class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
   }
 
   Future<void> _boot() async {
-    // Fired in parallel with app init, not awaited — by the time the user
-    // reaches the license gate / plans screen / expiry paywall, plans,
-    // trial config, the announcement and the update check are usually
-    // already warm (see LicenseService.warmUp), instead of each of those
-    // screens making its own fresh 15s-timeout RTDB round trip on open.
-    // That stacking (update check -> announcement -> paywall, each awaited
-    // in sequence in main_shell.dart) was the actual ~1 minute wait.
+    unawaited(_ensureBatteryExemption());
     unawaited(license.warmUp());
     license.startLiveUpdates();
-    // Requests the notification permission right away rather than waiting
-    // for the first announcement to exist — matches "ask when the app
-    // opens" rather than "ask the first time it's actually needed".
     unawaited(AppNotifications.init(onTapped: () {
       final ctx = rootNavigatorKey.currentContext;
       if (ctx != null) maybeShowAnnouncement(ctx, license);
     }));
     await appState.init();
-    // Same reasoning as the notification permission above, moved here from
-    // "first download click" — asking while a movie is playing full-screen
-    // popped a system dialog over the immersive video surface and left it
-    // stuck on a white frame (audio kept playing underneath).
     unawaited(appState.downloads.ensureStoragePermission());
-    // Same reasoning and same "ask once at boot, never mid-playback" rule as
-    // the storage/notification prompts above — see the AndroidManifest.xml
-    // comment on REQUEST_IGNORE_BATTERY_OPTIMIZATIONS for why this exists:
-    // some OEM skins (found on a ColorOS/Oppo device) freeze the app's
-    // process for a few seconds under normal background-management
-    // heuristics, and if that freeze lands mid-gesture (e.g. tapping a movie
-    // to play it) Android's own ANR watchdog can't tell the freeze apart
-    // from a real hang and kills the app. Being on the OS's exemption list
-    // is the standard mitigation. A no-op if already granted or the device
-    // doesn't support it.
-    unawaited(_ensureBatteryExemption());
-    await appState.tryAutoLogin();
-    // A reinstall wipes local storage, so a still-running trial needs to be
-    // handed back from its RTDB record (see restoreTrialIfAny) before
-    // deciding whether to show the license gate — otherwise a mid-trial
-    // reinstall locked the user out with no trial offered (checkTrialAvailability
-    // correctly refuses a second one) and no way back in either.
+    // Try auto-login with a hard 5s cap — on a slow connection the user
+    // shouldn't stare at a spinner longer than this. Trial restore runs in
+    // parallel so it doesn't add to the wait.
     await license.restoreTrialIfAny();
+    try {
+      await appState.tryAutoLogin().timeout(const Duration(seconds: 5));
+    } catch (_) {}
+    if (!mounted) return;
     final status = license.localStatus();
     setState(() {
       ready = true;
       licensed = status.valid;
       loggedIn = appState.client != null;
-      locked = loggedIn && appState.passcode.isNotEmpty;
+      locked = appState.client != null && appState.passcode.isNotEmpty;
     });
-    if (status.valid) _armLicenseWatch();
+    if (status.valid) {
+      _armLicenseWatch();
+      _armExpiryTimer(status);
+      _keyRevokedSub?.cancel();
+      _keyRevokedSub = license.keyRevoked.listen((_) => _onKeyRevoked());
+      license.startKeyWatcher();
+    }
   }
 
   // Same cadence as armLicenseWatch in the PC app's renderer — catches a
@@ -131,6 +119,29 @@ class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
   void _armLicenseWatch() {
     _licenseRecheckTimer?.cancel();
     _licenseRecheckTimer = Timer.periodic(const Duration(minutes: 2), (_) => _recheckLicense());
+  }
+
+  // Fires exactly when the license expires — no polling needed, instant redirect.
+  void _armExpiryTimer(LicenseStatus status) {
+    _expiryTimer?.cancel();
+    final msLeft = status.expiresAt - DateTime.now().millisecondsSinceEpoch;
+    if (msLeft <= 0) return;
+    _expiryTimer = Timer(Duration(milliseconds: msLeft), () {
+      if (mounted && licensed) {
+        setState(() => licensed = false);
+        appState.closePlayer();
+      }
+    });
+  }
+
+  // Admin revoked the key from the panel — SSE caught it, now bounce to gate.
+  void _onKeyRevoked() {
+    if (mounted && licensed) {
+      _licenseRecheckTimer?.cancel();
+      _expiryTimer?.cancel();
+      setState(() => licensed = false);
+      appState.closePlayer();
+    }
   }
 
   Future<void> _recheckLicense() async {
@@ -143,8 +154,13 @@ class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
   }
 
   void _onUnlocked() {
+    final status = license.localStatus();
     setState(() => licensed = true);
     _armLicenseWatch();
+    _armExpiryTimer(status);
+    _keyRevokedSub?.cancel();
+    _keyRevokedSub = license.keyRevoked.listen((_) => _onKeyRevoked());
+    license.startKeyWatcher();
   }
 
   @override
@@ -157,7 +173,12 @@ class _IptvAppState extends State<IptvApp> with WidgetsBindingObserver {
       // Floats the player above whatever route is currently showing (any
       // tab, or anything pushed on top of them) so it can stay mini and
       // playing while the user browses somewhere else — same reason it has
-      // to live here, outside the Navigator, rather than as a pushed route.
+      // to live here, outside the app's own Navigator, rather than as a
+      // pushed route. FloatingPlayer itself decides whether anything needs
+      // an Overlay/Navigator ancestor (see the comment in that file) — kept
+      // as a plain widget here so it stays a true no-op (SizedBox.shrink,
+      // nothing intercepting touches) whenever no player is launched, e.g.
+      // on the login/license screens.
       builder: (context, child) => Stack(
         children: [
           if (child != null) child,

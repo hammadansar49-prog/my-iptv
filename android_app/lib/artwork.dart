@@ -56,7 +56,8 @@ class Artwork extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final src = usableArtwork(url);
-    final ratio = MediaQuery.of(context).devicePixelRatio;
+    final mq = MediaQuery.of(context);
+    final ratio = mq.size.width > 0 ? mq.devicePixelRatio : 2.0;
     final child = src.isEmpty
         ? _placeholder()
         : CachedNetworkImage(

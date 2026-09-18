@@ -61,19 +61,37 @@ class _PaywallScreenState extends State<PaywallScreen> {
     _load();
   }
 
+  String? _loadError;
+
   Future<void> _load() async {
-    final results = await Future.wait([
-      widget.license.getPlans(),
-      widget.license.checkTrialAvailability(),
-    ]);
-    if (!mounted) return;
-    final list = results[0] as List<LicensePlan>;
-    setState(() {
-      plans = list;
-      trialAvailability = results[1] as Map<String, dynamic>;
-      loading = false;
-      if (list.isNotEmpty) selectedId = _ribbons(list).entries.firstWhere((e) => e.value == 'BEST OFFER', orElse: () => list.map((p) => MapEntry(p.id, '')).first).key;
-    });
+    try {
+      final results = await Future.wait([
+        widget.license.getPlans(),
+        widget.license.checkTrialAvailability(),
+      ]);
+      if (!mounted) return;
+      final list = results[0] as List<LicensePlan>;
+      setState(() {
+        plans = list;
+        trialAvailability = results[1] as Map<String, dynamic>;
+        loading = false;
+        _loadError = null;
+        if (list.isNotEmpty) {
+          final ribbons = _ribbons(list);
+          if (ribbons.isNotEmpty) {
+            selectedId = ribbons.entries.firstWhere((e) => e.value == 'BEST OFFER', orElse: () => ribbons.entries.first).key;
+          } else {
+            selectedId = list.first.id;
+          }
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        loading = false;
+        _loadError = 'Could not load plans. Check your connection and try again.';
+      });
+    }
   }
 
   // Cheapest-per-day non-lifetime plan is the reference point ("POPULAR");
@@ -110,13 +128,17 @@ class _PaywallScreenState extends State<PaywallScreen> {
       if (!mounted) return;
       setState(() => busy = false);
       if (result['ok'] == true) {
-        Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Free trial started!')));
+        Navigator.of(context).pop();
         return;
       }
+      // Trial failed — fall through to plan selection below.
     }
     final plan = _selected;
-    if (plan == null) return;
+    if (plan == null) {
+      if (mounted) setState(() => busy = false);
+      return;
+    }
     setState(() => busy = true);
     final ok = await widget.license.openPlanOnWhatsApp(plan);
     if (!mounted) return;
@@ -149,20 +171,25 @@ class _PaywallScreenState extends State<PaywallScreen> {
               final key = controller.text.trim();
               Navigator.pop(context);
               if (key.isEmpty) return;
-              final result = await widget.license.verifyKey(key);
-              if (!mounted) return;
-              if (result['valid'] == true) {
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Key activated!')));
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('That key could not be activated.')));
+              try {
+                final result = await widget.license.verifyKey(key);
+                if (!mounted) return;
+                if (result['valid'] == true) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Key activated!')));
+                  Navigator.of(context).pop();
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('That key could not be activated.')));
+                }
+              } catch (_) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Network error. Check your connection.')));
               }
             },
             child: const Text('Activate'),
           ),
         ],
       ),
-    );
+    ).then((_) => controller.dispose());
   }
 
   // Shared by the X button and the hardware back button, so both do exactly
@@ -204,7 +231,25 @@ class _PaywallScreenState extends State<PaywallScreen> {
       backgroundColor: AppColors.bg,
       body: loading
           ? Stack(children: [const Center(child: CircularProgressIndicator(color: AppColors.accent)), _closeButton()])
-          : Stack(
+          : _loadError != null
+              ? Stack(children: [
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(30),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.error_outline, color: AppColors.textDim, size: 36),
+                        const SizedBox(height: 12),
+                        Text(_loadError!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.textDim)),
+                        const SizedBox(height: 16),
+                        ElevatedButton(onPressed: () { setState(() { loading = true; _loadError = null; }); _load(); }, child: const Text('Retry')),
+                        const SizedBox(height: 12),
+                        TextButton(onPressed: _enterKey, child: const Text('Enter Key Instead', style: TextStyle(color: AppColors.accent))),
+                      ]),
+                    ),
+                  ),
+                  _closeButton(),
+                ])
+              : Stack(
               children: [
                 SingleChildScrollView(
                   padding: const EdgeInsets.only(bottom: 140),
@@ -268,15 +313,18 @@ class _PaywallScreenState extends State<PaywallScreen> {
                           ),
                         ),
                         const SizedBox(height: 10),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Text('Privacy Policy', style: TextStyle(color: AppColors.textDim, fontSize: 11)),
-                            const Text('  ·  ', style: TextStyle(color: AppColors.textDim, fontSize: 11)),
-                            const Text('Terms of Use', style: TextStyle(color: AppColors.textDim, fontSize: 11)),
-                            const Text('  ·  ', style: TextStyle(color: AppColors.textDim, fontSize: 11)),
-                            GestureDetector(onTap: _enterKey, child: const Text('Have a key?', style: TextStyle(color: AppColors.textDim, fontSize: 11, decoration: TextDecoration.underline))),
-                          ],
+                        SizedBox(
+                          width: double.infinity, height: 42,
+                          child: OutlinedButton.icon(
+                            onPressed: busy ? null : _enterKey,
+                            icon: const Icon(Icons.vpn_key, size: 16),
+                            label: const Text('Enter Key', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.text,
+                              side: BorderSide(color: AppColors.border),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+                            ),
+                          ),
                         ),
                       ],
                     ),

@@ -48,7 +48,7 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                 return ChoiceChip(
                   label: Text(e.value),
                   selected: active,
-                  onSelected: (_) => setState(() => s.setStr('defaultSection', e.key)),
+                  onSelected: (_) { s.setStr('defaultSection', e.key); setState(() {}); },
                   selectedColor: AppColors.accent,
                   backgroundColor: AppColors.bg3,
                   labelStyle: TextStyle(color: active ? Colors.white : AppColors.textDim, fontWeight: FontWeight.w600, fontSize: 12),
@@ -79,7 +79,7 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
               child: ListTile(
                 title: const Text('Skip / seek step', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                 trailing: DropdownButton<int>(
-                  value: s.seekStep,
+                  value: _seekSteps.containsKey(s.seekStep) ? s.seekStep : _seekSteps.keys.first,
                   dropdownColor: AppColors.bg3,
                   underline: const SizedBox(),
                   style: const TextStyle(color: AppColors.textDim, fontSize: 12),
@@ -98,7 +98,7 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                 title: const Text('Stream format', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                 subtitle: const Text('HLS plays smoothest on most providers.', style: TextStyle(color: AppColors.textDim, fontSize: 11)),
                 trailing: DropdownButton<String>(
-                  value: s.liveFormat,
+                  value: _liveFormats.containsKey(s.liveFormat) ? s.liveFormat : _liveFormats.keys.first,
                   dropdownColor: AppColors.bg3,
                   underline: const SizedBox(),
                   style: const TextStyle(color: AppColors.textDim, fontSize: 12),
@@ -117,7 +117,7 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                 title: const Text('Refresh Xtream', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                 subtitle: const Text('Catalog is cached for 10 minutes either way.', style: TextStyle(color: AppColors.textDim, fontSize: 11)),
                 trailing: DropdownButton<String>(
-                  value: s.refreshInterval,
+                  value: _refreshOptions.containsKey(s.refreshInterval) ? s.refreshInterval : _refreshOptions.keys.first,
                   dropdownColor: AppColors.bg3,
                   underline: const SizedBox(),
                   style: const TextStyle(color: AppColors.textDim, fontSize: 12),

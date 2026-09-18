@@ -41,13 +41,21 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver {
   late final Player player;
   late final VideoController videoController;
   late PlayRequest request;
 
   bool loading = true;
   String? error;
+  // True once Android has actually finished rotating into the requested
+  // orientation. Requesting the orientation change and letting the Video
+  // widget redraw into the new (full-screen landscape) layout in the same
+  // frame races the native rotation — on some GPU drivers the video texture
+  // comes back blank/white when that happens and never recovers. _buildVideo
+  // holds the video off-screen (spinner instead) until this flips true.
+  bool _chromeReady = false;
+  bool _rotationPending = false;
   bool controlsVisible = true;
   Timer? hideTimer;
   Timer? saveTimer;
@@ -75,7 +83,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription? _errSub;
   StreamSubscription? _completedSub;
   StreamSubscription? _bufferingSub;
+  StreamSubscription? _positionSub;
+  StreamSubscription? _durationSub;
+  StreamSubscription? _bufferSub;
+  StreamSubscription? _playingSub;
+  StreamSubscription? _tracksSub;
+  StreamSubscription? _trackSub;
   int _retries = 0;
+  bool _playbackInProgress = false;
   Timer? _retryTimer;
   Timer? _stallTimer;
   Timer? _freezeTimer;
@@ -105,6 +120,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void initState() {
     super.initState();
     request = widget.request;
+    WidgetsBinding.instance.addObserver(this);
     _applyChrome();
     WakelockPlus.enable();
     player = Player(configuration: const PlayerConfiguration(bufferSize: 64 * 1024 * 1024));
@@ -165,7 +181,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _retry() {
+    _retryTimer?.cancel();
+    _stallTimer?.cancel();
+    _freezeTimer?.cancel();
+    _audioWatchdog?.cancel();
     _retries = 0;
+    _freezeStrikes = 0;
+    _playbackInProgress = false;
     if (_slotHeld) {
       _startPlayback();
     } else {
@@ -183,29 +205,47 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (oldWidget.mini != widget.mini) _applyChrome();
   }
 
-  void _applyChrome() {
+  Future<void> _applyChrome() async {
     if (widget.mini) {
-      // Mini/PiP box: leave the rest of the app free to rotate/scroll behind it.
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      SystemChrome.setPreferredOrientations(const [
+      setState(() { _chromeReady = true; _rotationPending = false; });
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      await SystemChrome.setPreferredOrientations(const [
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ]);
     } else {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-      SystemChrome.setPreferredOrientations(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+      setState(() { _chromeReady = false; _rotationPending = true; });
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      await SystemChrome.setPreferredOrientations(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+      // Use a safety timeout — didChangeMetrics fires when the OS actually
+      // finishes rotating, which is the earliest safe point. 800ms covers
+      // slow GPU drivers (Oppo/Realme etc.) where 250ms was too fast and
+      // the texture came back white and never recovered.
+      await Future.delayed(const Duration(milliseconds: 800));
+      _finishRotation();
     }
+  }
+
+  void _finishRotation() {
+    if (!mounted || widget.mini || !_rotationPending) return;
+    _rotationPending = false;
+    setState(() => _chromeReady = true);
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (_rotationPending) _finishRotation();
   }
 
   void _onDownloadsChanged() { if (mounted) setState(() {}); }
 
   void _wireStreams() {
-    player.stream.position.listen((p) => mounted ? setState(() => position = p) : null);
-    player.stream.duration.listen((d) => mounted ? setState(() => duration = d) : null);
-    player.stream.buffer.listen((b) => mounted ? setState(() => buffered = b) : null);
-    player.stream.playing.listen((p) => mounted ? setState(() => playing = p) : null);
+    _positionSub = player.stream.position.listen((p) { if (mounted) setState(() => position = p); });
+    _durationSub = player.stream.duration.listen((d) { if (mounted) setState(() => duration = d); });
+    _bufferSub = player.stream.buffer.listen((b) { if (mounted) setState(() => buffered = b); });
+    _playingSub = player.stream.playing.listen((p) { if (mounted) setState(() => playing = p); });
     _bufferingSub = player.stream.buffering.listen((b) {
       if (!mounted) return;
       setState(() => buffering = b);
@@ -218,8 +258,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         setState(() => _showBufferSpinner = false);
       }
     });
-    player.stream.tracks.listen((t) => mounted ? setState(() => tracks = t) : null);
-    player.stream.track.listen((t) => mounted ? setState(() => currentTrack = t) : null);
+    _tracksSub = player.stream.tracks.listen((t) { if (mounted) setState(() => tracks = t); });
+    _trackSub = player.stream.track.listen((t) { if (mounted) setState(() => currentTrack = t); });
     _completedSub = player.stream.completed.listen((done) {
       if (!done || !mounted) return;
       _onEnded();
@@ -242,6 +282,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _audioWatchdog?.cancel();
     if (request.isLive && _retries < 3) {
       _retries++;
+      _playbackInProgress = false;
       setState(() {
         loading = true;
         error = null;
@@ -250,6 +291,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _retryTimer = Timer(Duration(milliseconds: 600 * _retries), _startPlayback);
       return;
     }
+    _playbackInProgress = false;
     setState(() {
       loading = false;
       error = request.isLive
@@ -259,11 +301,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _startPlayback() async {
-    if (!mounted) return;
+    if (!mounted || _playbackInProgress) return;
+    _playbackInProgress = true;
+    _freezeStrikes = 0;
+    _retryTimer?.cancel();
     setState(() {
       loading = true;
       error = null;
     });
+    final url = request.url;
+    if (url.isEmpty || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+      _playbackInProgress = false;
+      if (!mounted) return;
+      setState(() {
+        loading = false;
+        error = 'Invalid stream URL. The content may have been removed or the link is expired.';
+      });
+      return;
+    }
     try {
       await player.open(Media(request.url, httpHeaders: const {'User-Agent': 'VLC/3.0.21 Libavormat/61.19.100 Libavcodec/61.7.100'}));
       await player.setRate(speed);
@@ -280,8 +335,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           await player.seek(Duration(seconds: request.resumeAt.toInt()));
         }
       }
-      if (!mounted) return;
+      if (!mounted) { _playbackInProgress = false; return; }
       _retries = 0;
+      _playbackInProgress = false;
       setState(() => loading = false);
       _startHistoryTimer();
       _armAudioWatchdog();
@@ -297,6 +353,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _armFreezeWatchdog();
       }
     } catch (e) {
+      _playbackInProgress = false;
       if (!mounted) return;
       _handleFailure('It may be offline or blocked by the provider.');
     }
@@ -419,6 +476,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _saveProgress(force: true);
     hideTimer?.cancel();
     saveTimer?.cancel();
@@ -433,17 +491,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _errSub?.cancel();
     _completedSub?.cancel();
     _bufferingSub?.cancel();
+    _positionSub?.cancel();
+    _durationSub?.cancel();
+    _bufferSub?.cancel();
+    _playingSub?.cancel();
+    _tracksSub?.cancel();
+    _trackSub?.cancel();
     widget.state.downloads.removeListener(_onDownloadsChanged);
     player.dispose();
     if (_slotHeld) widget.state.releaseProviderSlot();
-    WakelockPlus.disable();
-    if (!widget.request.isLive) widget.state.downloads.playbackEnded();
+    WakelockPlus.disable().catchError((_) {});
+    if (!request.isLive) widget.state.downloads.playbackEnded();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
     super.dispose();
   }
 
   void _back() => widget.state.closePlayer();
+
+  @override
+  Future<bool> didPopRoute() async {
+    if (widget.mini) return false;
+    widget.state.closePlayer();
+    return true;
+  }
 
   String _fmt(Duration d) {
     if (d.isNegative) return '00:00';
@@ -513,10 +584,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  void _toggleFavorite() {
+  Future<void> _toggleFavorite() async {
     if (widget.favItem == null || widget.favSection == null) return;
-    widget.state.toggleFavorite(widget.favSection!, widget.favItem!);
-    setState(() {});
+    try {
+      await widget.state.toggleFavorite(widget.favSection!, widget.favItem!);
+    } catch (_) {}
+    if (mounted) setState(() {});
   }
 
   void _startDownload() {
@@ -571,18 +644,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     if (widget.mini) return _buildMiniBody();
-    return BackButtonListener(
-      // Not a routed screen anymore (see AppState.playerLaunch), so the
-      // hardware back button has nothing to pop — without this it would fall
-      // through to whatever screen is underneath while the full-screen player
-      // stayed on top. Matches the on-screen Back button: closes playback.
-      onBackButtonPressed: () async {
-        widget.state.closePlayer();
-        return true;
-      },
-      child: PopScope(
-      canPop: true,
-      child: Scaffold(
+    // Hardware/gesture back button is handled by didPopRoute() above, not a
+    // BackButtonListener/PopScope here — see the initState comment for why
+    // (this screen has no Router/Navigator ancestor to hook into).
+    return Scaffold(
         backgroundColor: Colors.black,
         body: GestureDetector(
           onTap: _toggleControls,
@@ -642,9 +707,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ],
           ),
         ),
-      ),
-      ),
-    );
+      );
   }
 
   // Small floating PiP box: just the picture plus a close/expand/play-pause
@@ -711,7 +774,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ),
       );
     }
-    if (loading) {
+    if (loading || !_chromeReady) {
       return const Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -787,7 +850,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               Container(
                                 height: 4,
                                 margin: const EdgeInsets.symmetric(horizontal: 8),
-                                decoration: BoxDecoration(color: Colors.white.withOpacity(.18), borderRadius: BorderRadius.circular(2)),
+                                decoration: BoxDecoration(color: Colors.white.withValues(alpha: .18), borderRadius: BorderRadius.circular(2)),
                                 child: FractionallySizedBox(
                                   alignment: Alignment.centerLeft,
                                   widthFactor: bufferedFrac,

@@ -37,14 +37,22 @@ class _LicenseGateScreenState extends State<LicenseGateScreen> {
     final key = _controller.text.trim();
     if (key.isEmpty) return;
     setState(() { _busy = true; _error = null; });
-    final result = await widget.license.verifyKey(key);
-    if (!mounted) return;
-    setState(() => _busy = false);
-    if (result['valid'] == true) {
-      widget.onUnlocked();
-      return;
+    try {
+      final result = await widget.license.verifyKey(key).timeout(const Duration(seconds: 15));
+      if (!mounted) return;
+      setState(() => _busy = false);
+      if (result['valid'] == true) {
+        widget.onUnlocked();
+        return;
+      }
+      setState(() => _error = _reasonText(result['reason'] as String?));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = "Couldn't reach the license server. Check your connection and try again.";
+      });
     }
-    setState(() => _error = _reasonText(result['reason'] as String?));
   }
 
   String _reasonText(String? reason) {
@@ -60,16 +68,21 @@ class _LicenseGateScreenState extends State<LicenseGateScreen> {
 
   Future<void> _openPlans() async {
     setState(() { _showPlans = true; _plansLoading = true; });
-    final results = await Future.wait([
-      widget.license.getPlans(),
-      widget.license.checkTrialAvailability(),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _plans = results[0] as List<LicensePlan>;
-      _trialAvailability = results[1] as Map<String, dynamic>;
-      _plansLoading = false;
-    });
+    try {
+      final results = await Future.wait([
+        widget.license.getPlans(),
+        widget.license.checkTrialAvailability(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _plans = results[0] as List<LicensePlan>;
+        _trialAvailability = results[1] as Map<String, dynamic>;
+        _plansLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { _plansLoading = false; });
+    }
   }
 
   Future<void> _getPackage(LicensePlan plan) async {

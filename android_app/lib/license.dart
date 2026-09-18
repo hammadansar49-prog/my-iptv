@@ -111,15 +111,22 @@ class LicenseService {
   // no attempt to apply the patch locally) and the warm cache above is
   // refreshed — callers hear about it through the two broadcast streams
   // below.
-  final _announcementUpdates = StreamController<Map<String, dynamic>?>.broadcast();
-  final _updateUpdates = StreamController<Map<String, dynamic>>.broadcast();
+  StreamController<Map<String, dynamic>?> _announcementUpdates = StreamController<Map<String, dynamic>?>.broadcast();
+  StreamController<Map<String, dynamic>> _updateUpdates = StreamController<Map<String, dynamic>>.broadcast();
+  StreamController<void> _keyRevoked = StreamController<void>.broadcast();
+  Stream<void> get keyRevoked => _keyRevoked.stream;
   Stream<Map<String, dynamic>?> get announcementUpdates => _announcementUpdates.stream;
   Stream<Map<String, dynamic>> get updateUpdates => _updateUpdates.stream;
   bool _liveStarted = false;
 
   void startLiveUpdates() {
     if (_liveStarted) return;
+    // Recreate controllers if they were closed by a previous stopLiveUpdates().
+    if (_announcementUpdates.isClosed) _announcementUpdates = StreamController<Map<String, dynamic>?>.broadcast();
+    if (_updateUpdates.isClosed) _updateUpdates = StreamController<Map<String, dynamic>>.broadcast();
+    if (_keyRevoked.isClosed) _keyRevoked = StreamController<void>.broadcast();
     _liveStarted = true;
+    _sseCancelled = false;
     _watchSse('/iptv/announcement', () async {
       final data = await getAnnouncement(force: true);
       if (!_announcementUpdates.isClosed) _announcementUpdates.add(data);
@@ -133,6 +140,72 @@ class LicenseService {
   void stopLiveUpdates() {
     _liveStarted = false;
     _sseCancelled = true;
+    _keySseCancelled = true;
+    if (!_announcementUpdates.isClosed) _announcementUpdates.close();
+    if (!_updateUpdates.isClosed) _updateUpdates.close();
+    if (!_keyRevoked.isClosed) _keyRevoked.close();
+  }
+
+  // Watches the user's own key in RTDB — the instant an admin revokes it (or
+  // it expires server-side), the SSE 'put' event fires, we re-check locally,
+  // and the `keyRevoked` stream notifies main.dart to bounce to the license
+  // gate immediately. Without this, revocation was only caught on the next
+  // 2-minute periodic recheck or the next app cold-start.
+  bool _keySseCancelled = false;
+  String? _watchedKeyId;
+
+  void startKeyWatcher() {
+    final lic = _readLocal();
+    final key = lic?['key'] as String?;
+    if (key == null || key.isEmpty) return;
+    if (_watchedKeyId == key) return;
+    _keySseCancelled = false;
+    _watchedKeyId = key;
+    _watchKeySse(key);
+  }
+
+  void _watchKeySse(String key) async {
+    var failures = 0;
+    while (!_keySseCancelled) {
+      http.Client? client;
+      try {
+        client = http.Client();
+        final req = http.Request('GET', Uri.parse('$_rtdbUrl/iptv/keys/${Uri.encodeComponent(key)}.json'));
+        req.headers['Accept'] = 'text/event-stream';
+        final res = await client.send(req);
+        failures = 0;
+        String? pendingEvent;
+        // Send a keepalive ping every 5 minutes to prevent Firebase from
+        // closing idle SSE connections after ~30 minutes of inactivity.
+        final keepalive = Timer.periodic(const Duration(minutes: 5), (_) async {
+          try { await client?.send(http.Request('GET', Uri.parse('$_rtdbUrl/.json?shallow=true'))); } catch (_) {}
+        });
+        try {
+          await for (final line in res.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+            if (_keySseCancelled) break;
+            if (line.startsWith('event: ')) {
+              pendingEvent = line.substring(7).trim();
+            } else if (line.startsWith('data: ')) {
+              if (pendingEvent == 'put' || pendingEvent == 'patch') {
+                await recheckNow();
+                final status = localStatus();
+                if (!status.valid && !_keyRevoked.isClosed) _keyRevoked.add(null);
+              }
+              pendingEvent = null;
+            }
+          }
+        } finally {
+          keepalive.cancel();
+        }
+      } catch (_) {
+        failures++;
+      } finally {
+        client?.close();
+      }
+      if (_keySseCancelled) break;
+      final backoff = Duration(seconds: (5 * (failures == 0 ? 1 : failures)).clamp(5, 60));
+      await Future.delayed(backoff);
+    }
   }
 
   bool _sseCancelled = false;
@@ -157,26 +230,35 @@ class LicenseService {
         final res = await client.send(req);
         failures = 0;
         String? pendingEvent;
-        await for (final line in res.stream.transform(utf8.decoder).transform(const LineSplitter())) {
-          if (_sseCancelled) break;
-          if (line.startsWith('event: ')) {
-            pendingEvent = line.substring(7).trim();
-          } else if (line.startsWith('data: ')) {
-            if (pendingEvent == 'put' || pendingEvent == 'patch') {
-              await onChange();
+        // Send a keepalive ping every 5 minutes to prevent Firebase from
+        // closing idle SSE connections after ~30 minutes of inactivity.
+        final keepalive = Timer.periodic(const Duration(minutes: 5), (_) async {
+          try { await client?.send(http.Request('GET', Uri.parse('$_rtdbUrl/.json?shallow=true'))); } catch (_) {}
+        });
+        try {
+          await for (final line in res.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+            if (_sseCancelled) break;
+            if (line.startsWith('event: ')) {
+              pendingEvent = line.substring(7).trim();
+            } else if (line.startsWith('data: ')) {
+              if (pendingEvent == 'put' || pendingEvent == 'patch') {
+                await onChange();
+              }
+              pendingEvent = null;
             }
-            pendingEvent = null;
           }
+        } finally {
+          keepalive.cancel();
         }
       } catch (_) {
         failures++;
-        // network blip / backgrounded app — just reconnect below.
       } finally {
         client?.close();
       }
       if (_sseCancelled) break;
       final backoff = Duration(seconds: (5 * (failures == 0 ? 1 : failures)).clamp(5, 60));
       await Future.delayed(backoff);
+      if (_sseCancelled) break;
     }
   }
 
@@ -296,6 +378,7 @@ class LicenseService {
           'machine_ids/$mid': true,
         });
         await _writeLocal({'key': trimmed, 'plan': map['plan_label'], 'expiresAt': expiresAt, 'lastVerifiedAt': now});
+        startKeyWatcher();
         return {'valid': true, 'plan': map['plan_label'], 'expiresAt': expiresAt};
       }
 
@@ -305,6 +388,7 @@ class LicenseService {
       final machineIds = Map<String, dynamic>.from(map['machine_ids'] ?? {});
       if (machineIds[mid] == true) {
         await _writeLocal({'key': trimmed, 'plan': map['plan_label'], 'expiresAt': expiresAt, 'lastVerifiedAt': now});
+        startKeyWatcher();
         return {'valid': true, 'plan': map['plan_label'], 'expiresAt': expiresAt};
       }
 
@@ -317,6 +401,7 @@ class LicenseService {
         'machine_ids/$mid': true,
       });
       await _writeLocal({'key': trimmed, 'plan': map['plan_label'], 'expiresAt': expiresAt, 'lastVerifiedAt': now});
+      startKeyWatcher();
       return {'valid': true, 'plan': map['plan_label'], 'expiresAt': expiresAt};
     } catch (e) {
       return {'valid': false, 'reason': 'network-error', 'error': e.toString()};
@@ -395,7 +480,7 @@ class LicenseService {
       final existing = await _rtdb('GET', '/iptv/trials/$mid');
       if (existing != null) return {'ok': false, 'reason': 'already-claimed'};
       final now = DateTime.now().millisecondsSinceEpoch;
-      final expiresAt = now + (config['durationHours'] as int) * 60 * 60 * 1000;
+      final expiresAt = now + ((config['durationHours'] as num?)?.toInt() ?? 24) * 60 * 60 * 1000;
       // RTDB rule (iptv/trials/$machineId, .write: "auth != null || !data.exists()")
       // lets this succeed exactly once per device — a second attempt after
       // a race loses to whichever write the server saw first.
@@ -471,7 +556,7 @@ class LicenseService {
 
   Future<bool> submitAnnouncementReview({required int rating, String comment = '', int? announcementCreatedAt}) async {
     try {
-      final id = '${DateTime.now().millisecondsSinceEpoch}_${DateTime.now().microsecond}';
+      final id = '${DateTime.now().millisecondsSinceEpoch}_${DateTime.now().microsecondsSinceEpoch}';
       await _rtdb('PUT', '/iptv/announcement_reviews/$id', body: {
         'rating': rating.clamp(1, 5),
         'comment': comment.trim().length > 1000 ? comment.trim().substring(0, 1000) : comment.trim(),
@@ -504,8 +589,13 @@ class LicenseService {
   }
 
   Future<Map<String, dynamic>> checkForUpdate({bool force = false}) async {
-    final info = await PackageInfo.fromPlatform();
-    final currentVersion = info.version;
+    String currentVersion;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      currentVersion = info.version;
+    } catch (_) {
+      currentVersion = '0.0.0';
+    }
     if (!force && _updateLoaded) return {..._updateCache!, 'currentVersion': currentVersion};
     try {
       final data = await _rtdb('GET', '/iptv/update', timeout: const Duration(seconds: 7));

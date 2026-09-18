@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../theme.dart';
@@ -16,26 +19,67 @@ class LockScreen extends StatefulWidget {
 class _LockScreenState extends State<LockScreen> {
   String entered = '';
   bool wrong = false;
+  int _failCount = 0;
+  Timer? _lockoutTimer;
+  int _lockoutSeconds = 0;
+
+  @override
+  void dispose() {
+    _lockoutTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Escalating lockout: 3 fails → 10s, 5 fails → 30s, 7 fails → 60s.
+  int get _lockoutDuration {
+    if (_failCount >= 7) return 60;
+    if (_failCount >= 5) return 30;
+    if (_failCount >= 3) return 10;
+    return 0;
+  }
+
+  void _startLockout() {
+    _lockoutSeconds = _lockoutDuration;
+    if (_lockoutSeconds <= 0) return;
+    _lockoutTimer?.cancel();
+    _lockoutTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) { t.cancel(); return; }
+      if (_lockoutSeconds <= 0) {
+        t.cancel();
+        setState(() => _lockoutSeconds = 0);
+      } else {
+        setState(() => _lockoutSeconds--);
+      }
+    });
+  }
 
   void _tap(String d) {
     if (entered.length >= 4) return;
+    if (_lockoutSeconds > 0) return;
     setState(() {
       entered += d;
       wrong = false;
     });
     if (entered.length == 4) {
-      if (entered == widget.state.passcode) {
+      final hashedEntered = sha256.convert(utf8.encode(entered)).toString();
+      if (hashedEntered == widget.state.passcode) {
+        _failCount = 0;
+        _lockoutTimer?.cancel();
         widget.onUnlocked();
       } else {
+        _failCount++;
         setState(() => wrong = true);
+        _startLockout();
         Future.delayed(const Duration(milliseconds: 400), () {
-          if (mounted) setState(() => entered = '');
+          if (mounted) setState(() { entered = ''; wrong = false; });
         });
       }
     }
   }
 
-  void _backspace() => setState(() => entered = entered.isEmpty ? '' : entered.substring(0, entered.length - 1));
+  void _backspace() {
+    if (_lockoutSeconds > 0) return;
+    setState(() => entered = entered.isEmpty ? '' : entered.substring(0, entered.length - 1));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -48,7 +92,10 @@ class _LockScreenState extends State<LockScreen> {
             children: [
               const Icon(Icons.lock_outline, color: AppColors.accent, size: 40),
               const SizedBox(height: 14),
-              const Text('Enter passcode', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+              Text(
+                _lockoutSeconds > 0 ? 'Too many attempts. Wait $_lockoutSeconds s' : 'Enter passcode',
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 20),
               Row(
                 mainAxisSize: MainAxisSize.min,

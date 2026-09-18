@@ -24,7 +24,7 @@ class LiveTvScreen extends StatefulWidget {
   State<LiveTvScreen> createState() => _LiveTvScreenState();
 }
 
-class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderStateMixin {
+class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final Player player;
   late final VideoController videoController;
   late PlayableItem current;
@@ -32,12 +32,21 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
   bool loading = true;
   String? error;
   String search = '';
+  Timer? _searchDebounce;
+  final _searchFocus = FocusNode();
   // Was: pause+stop this player, push a brand-new PlayerScreen with a brand-
   // new Player/connection for fullscreen, then reopen a THIRD connection on
   // the way back — the visible "loading again" every time the fullscreen
   // button was pressed. Fullscreen is now just this same widget/State/Player
   // relaid out full-screen-landscape; nothing ever reconnects.
   bool fullscreen = false;
+  // True once Android has actually finished rotating into the requested
+  // orientation. Requesting the orientation change and letting the Video
+  // widget redraw into the new (landscape) layout in the same frame races
+  // the native rotation — on some GPU drivers the video texture comes back
+  // blank/white when that happens and never recovers. _setFullscreen holds
+  // the video off-screen (spinner instead) until this flips true.
+  bool _chromeReady = true;
 
   // Swipe-up-on-the-video "grow" gesture (stays in portrait, unlike the
   // fullscreen/landscape button above) — a continuous 0..1 value driven
@@ -60,6 +69,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
     _expandCtrl.animateTo(open ? 1 : 0, curve: Curves.easeOutCubic);
   }
   int _retries = 0;
+  bool _openInProgress = false;
   Timer? _retryTimer;
   Timer? _stallTimer;
   Timer? _freezeTimer;
@@ -69,19 +79,29 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
   bool _audioWarned = false;
   Duration position = Duration.zero;
   StreamSubscription? _errSub;
+  StreamSubscription? _playingSub;
+  StreamSubscription? _positionSub;
+  StreamSubscription? _tracksSub;
+  StreamSubscription? _trackSub;
+  StreamSubscription? _bufferingSub;
   Tracks tracks = const Tracks();
   Track currentTrack = const Track();
+  bool buffering = false;
+
+  bool _rotationPending = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     current = widget.initial;
     player = Player(configuration: const PlayerConfiguration(bufferSize: 64 * 1024 * 1024));
     videoController = VideoController(player, configuration: const VideoControllerConfiguration(hwdec: 'no'));
-    player.stream.playing.listen((p) => mounted ? setState(() => playing = p) : null);
-    player.stream.position.listen((p) => mounted ? setState(() => position = p) : null);
-    player.stream.tracks.listen((t) => mounted ? setState(() => tracks = t) : null);
-    player.stream.track.listen((t) => mounted ? setState(() => currentTrack = t) : null);
+    _playingSub = player.stream.playing.listen((p) { if (mounted) setState(() => playing = p); });
+    _positionSub = player.stream.position.listen((p) { if (mounted) setState(() => position = p); });
+    _tracksSub = player.stream.tracks.listen((t) { if (mounted) setState(() => tracks = t); });
+    _trackSub = player.stream.track.listen((t) { if (mounted) setState(() => currentTrack = t); });
+    _bufferingSub = player.stream.buffering.listen((b) { if (mounted) setState(() => buffering = b); });
     _errSub = player.stream.error.listen((msg) { if (mounted) _handleFailure(msg); });
     WakelockPlus.enable();
     _beginPlayback();
@@ -127,7 +147,13 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
   }
 
   void _retry() {
+    _retryTimer?.cancel();
+    _stallTimer?.cancel();
+    _freezeTimer?.cancel();
+    _audioWatchdog?.cancel();
     _retries = 0;
+    _freezeStrikes = 0;
+    _openInProgress = false;
     if (_slotHeld) {
       _open(current);
     } else {
@@ -136,14 +162,29 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
   }
 
   Future<void> _open(PlayableItem ch) async {
+    if (_openInProgress) return;
+    _openInProgress = true;
+    _freezeStrikes = 0;
+    _retryTimer?.cancel();
     setState(() {
       current = ch;
       loading = true;
       error = null;
       position = Duration.zero;
     });
+    final url = widget.state.liveUrl(ch.id);
+    if (url.isEmpty || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+      _openInProgress = false;
+      if (!mounted) return;
+      setState(() {
+        loading = false;
+        error = 'Invalid stream URL. The channel may be temporarily unavailable.';
+      });
+      return;
+    }
     try {
-      await player.open(Media(widget.state.liveUrl(ch.id), httpHeaders: const {'User-Agent': 'VLC/3.0.21 Libavormat/61.19.100 Libavcodec/61.7.100'}));
+      await player.open(Media(url, httpHeaders: const {'User-Agent': 'VLC/3.0.21 Libavormat/61.19.100 Libavcodec/61.7.100'}));
+      _openInProgress = false;
       if (!mounted) return;
       _retries = 0;
       setState(() => loading = false);
@@ -154,6 +195,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
       _armFreezeWatchdog();
       _armAudioWatchdog();
     } catch (e) {
+      _openInProgress = false;
       if (!mounted) return;
       _handleFailure('It may be offline or blocked by the provider.');
     }
@@ -194,7 +236,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
     _lastFreezeCheckPos = position;
     _freezeTimer = Timer.periodic(const Duration(seconds: 8), (_) {
       if (!mounted) return;
-      if (!playing) {
+      if (!playing || buffering) {
         _lastFreezeCheckPos = position;
         return;
       }
@@ -219,11 +261,13 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
     _audioWatchdog?.cancel();
     if (_retries < 3) {
       _retries++;
+      _openInProgress = false;
       setState(() { loading = true; error = null; });
       _retryTimer?.cancel();
       _retryTimer = Timer(Duration(milliseconds: 600 * _retries), () => _open(current));
       return;
     }
+    _openInProgress = false;
     setState(() {
       loading = false;
       error = 'This channel is unavailable right now — try another.';
@@ -233,28 +277,66 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
   // Same Player/connection throughout — fullscreen only changes system
   // chrome + orientation + which controls are drawn, never touches the
   // stream itself.
-  void _setFullscreen(bool v) {
-    setState(() => fullscreen = v);
+  Future<void> _setFullscreen(bool v) async {
     if (v) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-      SystemChrome.setPreferredOrientations(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+      setState(() { fullscreen = true; _chromeReady = false; _rotationPending = true; });
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      await SystemChrome.setPreferredOrientations(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+      // Wait for the ACTUAL native rotation to finish before allowing the
+      // Video widget back on screen. A fixed delay (the old 250ms) races
+      // the OS rotation — on Oppo/Realme/etc. GPUs the rotation takes
+      // longer and the texture comes back white and never recovers.
+      // didChangeMetrics fires the instant the screen dimensions change,
+      // which is the earliest safe point. 800ms is a safety timeout only.
+      await Future.delayed(const Duration(milliseconds: 800));
+      _finishRotation();
     } else {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+      setState(() { fullscreen = false; _chromeReady = true; _rotationPending = false; });
+      _expandCtrl.reset();
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      await SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
     }
+  }
+
+  void _finishRotation() {
+    if (!mounted || !fullscreen || !_rotationPending) return;
+    _rotationPending = false;
+    setState(() => _chromeReady = true);
+    // Force mpv to decode one fresh frame after rotation.  On some GPU
+    // drivers the surface is recreated during the orientation change and
+    // the very first rendered frame can be blank — a micro-seek nudges
+    // mpv to produce a new decoded frame on the new surface.
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted && playing && position > Duration.zero) {
+        player.seek(position + const Duration(milliseconds: 50));
+      }
+    });
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (_rotationPending) _finishRotation();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _searchDebounce?.cancel();
     _retryTimer?.cancel();
     _stallTimer?.cancel();
     _freezeTimer?.cancel();
     _audioWatchdog?.cancel();
     _errSub?.cancel();
+    _playingSub?.cancel();
+    _positionSub?.cancel();
+    _tracksSub?.cancel();
+    _trackSub?.cancel();
+    _bufferingSub?.cancel();
+    _searchFocus.dispose();
     _expandCtrl.dispose();
     player.dispose();
     if (_slotHeld) widget.state.releaseProviderSlot();
-    WakelockPlus.disable();
+    WakelockPlus.disable().catchError((_) {});
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
     super.dispose();
@@ -267,30 +349,24 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
   // full-screen with the live-style overlay (no seek bar, matches the
   // fullscreen player screen used for movies/episodes).
   Widget _buildFullscreen() {
-    return BackButtonListener(
-      onBackButtonPressed: () async {
-        _setFullscreen(false);
-        return true;
-      },
-      child: PopScope(
-        canPop: false,
-        onPopInvokedWithResult: (didPop, _) { if (!didPop) _setFullscreen(false); },
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Stack(
-            fit: StackFit.expand,
-            children: [
-              _buildVideo(),
-              if (!loading && error == null)
-                SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Text(current.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                  ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) { if (!didPop) _setFullscreen(false); },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            _buildVideo(ready: _chromeReady),
+            if (!loading && error == null)
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Text(current.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
                 ),
-              if (!loading && error == null) _buildInlineControls(),
-            ],
-          ),
+              ),
+            if (!loading && error == null) _buildInlineControls(),
+          ],
         ),
       ),
     );
@@ -300,7 +376,10 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
     final list = search.isEmpty ? widget.channels : widget.channels.where((c) => c.name.toLowerCase().contains(search.toLowerCase())).toList();
     return Scaffold(
       appBar: AppBar(title: Text(current.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
-      body: Column(
+      body: GestureDetector(
+        onTap: () => _searchFocus.unfocus(),
+        behavior: HitTestBehavior.translucent,
+        child: Column(
         children: [
           AnimatedBuilder(
             animation: _expandCtrl,
@@ -338,7 +417,15 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
             child: TextField(
-              onChanged: (v) => setState(() => search = v),
+              focusNode: _searchFocus,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _searchFocus.unfocus(),
+              onChanged: (v) {
+                _searchDebounce?.cancel();
+                _searchDebounce = Timer(const Duration(milliseconds: 200), () {
+                  if (mounted) setState(() => search = v);
+                });
+              },
               style: const TextStyle(fontSize: 13),
               decoration: const InputDecoration(isDense: true, hintText: 'Search channels...', prefixIcon: Icon(Icons.search, size: 18)),
             ),
@@ -357,14 +444,16 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
               itemBuilder: (context, i) {
                 final ch = list[i];
                 final active = ch.id == current.id;
+                final isFav = widget.state.isFavorite('live', ch);
                 return Padding(
+                  key: ValueKey(ch.id),
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Material(
                     color: active ? AppColors.bg3 : AppColors.bg2,
                     borderRadius: BorderRadius.circular(12),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(12),
-                      onTap: active ? null : () => _open(ch),
+                      onTap: active ? null : () { _searchFocus.unfocus(); _open(ch); },
                       child: Container(
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(12),
@@ -382,8 +471,8 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
                             active
                                 ? Icon(playing ? Icons.equalizer : Icons.pause, color: AppColors.accent, size: 18)
                                 : IconButton(
-                                    icon: Icon(widget.state.isFavorite('live', ch) ? Icons.favorite : Icons.favorite_border, size: 18, color: widget.state.isFavorite('live', ch) ? const Color(0xFFFF5D7A) : AppColors.textDim),
-                                    onPressed: () async { await widget.state.toggleFavorite('live', ch); setState(() {}); },
+                                    icon: Icon(isFav ? Icons.favorite : Icons.favorite_border, size: 18, color: isFav ? const Color(0xFFFF5D7A) : AppColors.textDim),
+                                    onPressed: () async { await widget.state.toggleFavorite('live', ch); if (!mounted) return; setState(() {}); },
                                   ),
                           ],
                         ),
@@ -395,6 +484,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -411,7 +501,8 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
   }
 
   Widget _roundIcon(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
+    return InkWell(
+      customBorder: const CircleBorder(),
       onTap: onTap,
       child: Container(
         width: 34, height: 34,
@@ -421,7 +512,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildVideo() {
+  Widget _buildVideo({bool ready = true}) {
     if (error != null) {
       return Center(
         child: Padding(
@@ -436,9 +527,14 @@ class _LiveTvScreenState extends State<LiveTvScreen> with SingleTickerProviderSt
         ),
       );
     }
-    if (loading) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.accent));
-    }
-    return Video(controller: videoController, controls: NoVideoControls, fit: BoxFit.contain);
+    // The Video widget must ALWAYS stay in the tree during orientation
+    // changes (fullscreen toggle). Destroying and recreating it races the
+    // native rotation — on some GPU drivers the texture comes back white
+    // and never recovers. Overlay the spinner on top instead of swapping.
+    return Stack(fit: StackFit.expand, children: [
+      Video(controller: videoController, controls: NoVideoControls, fit: BoxFit.contain),
+      if (loading || !ready)
+        const Center(child: CircularProgressIndicator(color: AppColors.accent)),
+    ]);
   }
 }

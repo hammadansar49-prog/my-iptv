@@ -33,7 +33,17 @@ class DownloadManager extends ChangeNotifier {
   Timer? _ticker;
   Timer? _saveTimer;
   Timer? _retryTimer;
+  Timer? _initTimer;
   int _lastNotify = 0;
+
+  @override
+  void dispose() {
+    _initTimer?.cancel();
+    _ticker?.cancel();
+    _saveTimer?.cancel();
+    _retryTimer?.cancel();
+    super.dispose();
+  }
 
   Future<void> init() async {
     Directory? base;
@@ -54,7 +64,7 @@ class DownloadManager extends ChangeNotifier {
         }
       } catch (_) {}
     }
-    Timer(const Duration(seconds: 3), _pump);
+    _initTimer = Timer(const Duration(seconds: 3), _pump);
   }
 
   // ---- queries ----
@@ -282,8 +292,16 @@ class DownloadManager extends ChangeNotifier {
       }
       final appending = res.statusCode == 206 && have > 0;
       if (res.statusCode == 206) {
-        final m = RegExp(r'/(\d+)\s*$').firstMatch(res.headers.value(HttpHeaders.contentRangeHeader) ?? '');
-        if (m != null) item.totalBytes = int.parse(m.group(1)!);
+        final rangeHeader = res.headers.value(HttpHeaders.contentRangeHeader) ?? '';
+        final m = RegExp(r'/(\d+)\s*$').firstMatch(rangeHeader);
+        if (m != null) {
+          item.totalBytes = int.parse(m.group(1)!);
+        } else if (item.totalBytes <= 0) {
+          // Content-Range present but unparseable (e.g. "bytes */total") and
+          // we don't know the total yet — treat as unknown-length download
+          // that finishes when the server closes the connection.
+          item.totalBytes = 0;
+        }
       } else if (res.contentLength > 0) {
         item.totalBytes = res.contentLength;
       }
@@ -398,7 +416,7 @@ class DownloadManager extends ChangeNotifier {
       _saveTimer ??= Timer(const Duration(seconds: 5), _save);
     }
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (save || now - _lastNotify > 300) {
+    if (save || now - _lastNotify > 100) {
       _lastNotify = now;
       notifyListeners();
     }

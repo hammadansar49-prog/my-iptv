@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../app_state.dart';
 import '../license.dart';
 import '../models.dart';
@@ -70,7 +71,10 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   Future<void> _refreshContent() async {
-    await widget.state.refreshCatalog();
+    try {
+      await widget.state.refreshCatalog();
+    } catch (_) {}
+    if (!mounted) return;
     setState(() {
       movies = series = live = null;
     });
@@ -99,6 +103,22 @@ class _ProfileTabState extends State<ProfileTab> {
     );
   }
 
+  Future<void> _openBatterySettings() async {
+    try {
+      if (await Permission.ignoreBatteryOptimizations.isGranted) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Battery optimization is already off for this app.')),
+        );
+        return;
+      }
+      await Permission.ignoreBatteryOptimizations.request();
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open battery settings.')),
+      );
+    }
+  }
+
   bool _checkingUpdate = false;
 
   // Manual re-check for the Profile screen — separate from the silent one
@@ -112,7 +132,8 @@ class _ProfileTabState extends State<ProfileTab> {
     if (widget.license == null || _checkingUpdate) return;
     setState(() => _checkingUpdate = true);
     await maybeShowUpdate(context, widget.license!, force: true, announceIfCurrent: true);
-    if (mounted) setState(() => _checkingUpdate = false);
+    if (!mounted) return;
+    setState(() => _checkingUpdate = false);
   }
 
   void _openSecurity() {
@@ -163,7 +184,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(color: AppColors.success.withOpacity(.15), borderRadius: BorderRadius.circular(20)),
+                  decoration: BoxDecoration(color: AppColors.success.withValues(alpha: .15), borderRadius: BorderRadius.circular(20)),
                   child: const Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.circle, size: 8, color: AppColors.success),
                     SizedBox(width: 5),
@@ -227,6 +248,8 @@ class _ProfileTabState extends State<ProfileTab> {
                   ),
                 ],
                 const Divider(height: 1, color: AppColors.border, indent: 68),
+                _settingsRow(Icons.battery_saver, AppColors.tileCyan, 'Battery Optimization', 'Allow background playback. Tap to open battery settings.', _openBatterySettings),
+                const Divider(height: 1, color: AppColors.border, indent: 68),
                 _settingsRow(Icons.logout, AppColors.tileRed, 'Logout', 'Sign out of this playlist on your device.', _logout, danger: true),
               ],
             ),
@@ -239,7 +262,7 @@ class _ProfileTabState extends State<ProfileTab> {
   Widget _statCard(int? value, String label, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: BoxDecoration(color: color.withOpacity(.12), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(.3))),
+      decoration: BoxDecoration(color: color.withValues(alpha: .12), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: .3))),
       child: Column(
         children: [
           countsLoading && value == null
@@ -294,9 +317,11 @@ class _ProfileTabState extends State<ProfileTab> {
 
   String? _tsToDate(dynamic ts) {
     if (ts == null) return null;
-    final seconds = int.tryParse('$ts');
-    if (seconds == null || seconds == 0) return null;
-    final d = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+    final val = int.tryParse('$ts');
+    if (val == null || val == 0) return null;
+    // Handle both seconds and milliseconds timestamps
+    final ms = val > 1e12 ? val : val * 1000;
+    final d = DateTime.fromMillisecondsSinceEpoch(ms);
     const wd = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return '${wd[d.weekday - 1]}, ${mo[d.month - 1]} ${d.day}, ${d.year}';

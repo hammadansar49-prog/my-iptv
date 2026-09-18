@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../app_state.dart';
 import '../artwork.dart';
 import '../models.dart';
@@ -74,6 +75,12 @@ class _ListsScreenState extends State<ListsScreen> {
               ],
             ),
             onTap: () {
+              if (widget.state.client == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Session expired. Please log in again.')),
+                );
+                return;
+              }
               final req = PlayRequest(
                 url: h.url, isLive: h.isLive, type: h.type, title: h.title, subtitle: h.subtitle,
                 thumb: h.thumb, historyKey: h.key, resumeAt: h.resumeAt,
@@ -97,9 +104,17 @@ class _ListsScreenState extends State<ListsScreen> {
         maxCrossAxisExtent: 150, childAspectRatio: 2 / 3.4, crossAxisSpacing: 10, mainAxisSpacing: 10,
       ),
       itemCount: list.length,
-      itemBuilder: (context, i) {
+        itemBuilder: (context, i) {
         final f = list[i];
-        return GestureDetector(
+        return Focus(
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent && (event.logicalKey == LogicalKeyboardKey.select || event.logicalKey == LogicalKeyboardKey.enter)) {
+              _openFavorite(f);
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          child: GestureDetector(
           onTap: () => _openFavorite(f),
           child: Container(
             decoration: BoxDecoration(color: AppColors.bg2, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
@@ -115,6 +130,7 @@ class _ListsScreenState extends State<ListsScreen> {
               ],
             ),
           ),
+        ),
         );
       },
     );
@@ -138,9 +154,13 @@ class _ListsScreenState extends State<ListsScreen> {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => LiveTvScreen(state: widget.state, channels: liveFavs, initial: f.item)));
       return;
     }
-    final client = widget.state.client!;
+    final client = widget.state.client;
+    if (client == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session expired. Please login again.')));
+      return;
+    }
     final req = PlayRequest(
-      url: client.vodUrl(f.item.id, ext: f.item.containerExt), isLive: false, type: 'movie',
+      url: client.vodUrl(f.item.id, ext: f.item.containerExt ?? 'mp4'), isLive: false, type: 'movie',
       title: f.item.name, subtitle: 'Movie', thumb: f.item.thumb, historyKey: 'movie:${f.item.id}',
     );
     final existing = widget.state.findHistory(req.historyKey);

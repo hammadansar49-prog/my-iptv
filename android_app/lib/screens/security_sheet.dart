@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../theme.dart';
@@ -11,6 +13,8 @@ class SecuritySheet extends StatefulWidget {
 }
 
 class _SecuritySheetState extends State<SecuritySheet> {
+  String _hashPasscode(String code) => sha256.convert(utf8.encode(code)).toString();
+
   @override
   Widget build(BuildContext context) {
     final on = widget.state.passcode.isNotEmpty;
@@ -41,10 +45,11 @@ class _SecuritySheetState extends State<SecuritySheet> {
               onChanged: (v) async {
                 if (v) {
                   final code = await _promptCode(context, title: 'Set a passcode');
-                  if (code != null) await widget.state.setStr('passcode', code);
+                  if (code != null) await widget.state.setStr('passcode', _hashPasscode(code));
                 } else {
                   await widget.state.setStr('passcode', '');
                 }
+                if (!mounted) return;
                 setState(() {});
               },
             ),
@@ -54,8 +59,20 @@ class _SecuritySheetState extends State<SecuritySheet> {
                 title: const Text('Change passcode', style: TextStyle(fontSize: 13)),
                 trailing: const Icon(Icons.chevron_right, color: AppColors.textDim),
                 onTap: () async {
+                  // Verify old passcode before allowing change
+                  final oldCode = await _promptCode(context, title: 'Enter current passcode');
+                  if (oldCode == null) return;
+                  final oldHashed = _hashPasscode(oldCode);
+                  if (oldHashed != widget.state.passcode) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Incorrect current passcode.')),
+                    );
+                    return;
+                  }
                   final code = await _promptCode(context, title: 'New passcode');
-                  if (code != null) await widget.state.setStr('passcode', code);
+                  if (code != null) await widget.state.setStr('passcode', _hashPasscode(code));
+                  if (!mounted) return;
                   setState(() {});
                 },
               ),
@@ -84,12 +101,13 @@ class _SecuritySheetState extends State<SecuritySheet> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
             onPressed: () {
-              if (ctrl.text.trim().length == 4) Navigator.pop(context, ctrl.text.trim());
+              final text = ctrl.text.trim();
+              if (text.length == 4 && RegExp(r'^\d{4}$').hasMatch(text)) Navigator.pop(context, text);
             },
             child: const Text('Save'),
           ),
         ],
       ),
-    );
+    ).then((result) { ctrl.dispose(); return result; });
   }
 }

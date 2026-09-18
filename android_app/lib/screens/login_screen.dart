@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../license.dart';
+import '../storage.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../xtream_client.dart';
@@ -26,11 +27,28 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   bool loading = false;
   bool showPassword = false;
   String? error;
+  List<Account> _savedAccounts = [];
 
   @override
   void initState() {
     super.initState();
     tabController = TabController(length: 2, vsync: this);
+    _savedAccounts = widget.state.savedAccounts;
+  }
+
+  @override
+  void dispose() {
+    tabController.dispose();
+    urlCtrl.dispose();
+    userCtrl.dispose();
+    passCtrl.dispose();
+    m3uNameCtrl.dispose();
+    m3uUrlCtrl.dispose();
+    super.dispose();
+  }
+
+  void _refreshSavedAccounts() {
+    setState(() => _savedAccounts = widget.state.savedAccounts);
   }
 
   Future<void> _doLogin(Account acc) async {
@@ -39,14 +57,18 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       error = null;
     });
     try {
+      // Ensure password is in secure storage before login reads it.
+      if (acc.password.isNotEmpty) await Storage.savePassword(acc.id, acc.password);
       await widget.state.login(acc);
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => MainShell(state: widget.state, license: widget.license)),
       );
     } on XtreamException catch (e) {
+      if (!mounted) return;
       setState(() => error = e.message);
     } catch (e) {
+      if (!mounted) return;
       setState(() => error = 'Something went wrong. Please try again.');
     } finally {
       if (mounted) setState(() => loading = false);
@@ -84,7 +106,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    final saved = widget.state.savedAccounts;
+    final saved = _savedAccounts;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -182,7 +204,8 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                 icon: const Icon(Icons.close, size: 18, color: AppColors.textDim),
                                 onPressed: () async {
                                   await widget.state.removeAccount(acc.id);
-                                  setState(() {});
+                                  if (!mounted) return;
+                                  _refreshSavedAccounts();
                                 },
                               ),
                             ],

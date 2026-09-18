@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../app_state.dart';
 import '../artwork.dart';
 import '../license.dart';
@@ -43,6 +44,7 @@ class _HomeTabState extends State<HomeTab> {
   final pageCtrl = PageController(viewportFraction: 1);
   final searchCtrl = TextEditingController();
   Timer? _heroAutoTimer;
+  Timer? _countdownTimer;
 
   @override
   void initState() {
@@ -56,6 +58,7 @@ class _HomeTabState extends State<HomeTab> {
     });
     _loadSection();
     _armHeroAutoplay();
+    _armCountdownIfNeeded();
   }
 
   // The hero carousel (poster + Play/My List row at the top of Home) now
@@ -80,10 +83,26 @@ class _HomeTabState extends State<HomeTab> {
   @override
   void dispose() {
     _heroAutoTimer?.cancel();
+    _countdownTimer?.cancel();
     searchCtrl.dispose();
     pageCtrl.dispose();
     scrollCtrl.dispose();
     super.dispose();
+  }
+
+  // When < 1 hour remains, rebuild every second so the badge shows a live
+  // h:mm:ss countdown instead of a static "1h".
+  void _armCountdownIfNeeded() {
+    _countdownTimer?.cancel();
+    final license = widget.license;
+    if (license == null) return;
+    final status = license.localStatus();
+    if (!status.valid) return;
+    final msLeft = status.expiresAt - DateTime.now().millisecondsSinceEpoch;
+    if (msLeft <= 0 || msLeft > 3600000) return;
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   String get _cacheKey => '$section:${categoryId ?? 'all'}';
@@ -160,7 +179,8 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   Future<void> _loadCategoryItems(String? catId, {bool force = false}) async {
-    final key = '$section:${catId ?? 'all'}';
+    final mySection = section;
+    final key = '$mySection:${catId ?? 'all'}';
     if (!force && widget.state.itemCache.containsKey(key)) {
       setState(() {
         items = widget.state.itemCache[key]!;
@@ -174,16 +194,18 @@ class _HomeTabState extends State<HomeTab> {
       itemsError = null;
     });
     try {
-      final list = await widget.state.sectionItems(section, categoryId: catId, force: force);
+      final list = await widget.state.sectionItems(mySection, categoryId: catId, force: force);
+      if (!mounted || section != mySection) return;
       setState(() {
         items = list;
         itemsLoading = false;
         renderedCount = pageSize.clamp(0, items.length);
       });
     } catch (e) {
+      if (!mounted || section != mySection) return;
       setState(() {
         itemsLoading = false;
-        itemsError = e is XtreamException ? e.message : 'Could not load $section.';
+        itemsError = e is XtreamException ? e.message : 'Could not load $mySection.';
       });
     }
   }
@@ -243,7 +265,7 @@ class _HomeTabState extends State<HomeTab> {
                             },
                           )),
                     ],
-                  ),
+        ),
       ),
     );
   }
@@ -260,7 +282,8 @@ class _HomeTabState extends State<HomeTab> {
     final now = DateTime.now();
     if (_lastOpenItem != null && now.difference(_lastOpenItem!) < const Duration(milliseconds: 800)) return;
     _lastOpenItem = now;
-    final client = widget.state.client!;
+    final client = widget.state.client;
+    if (client == null) return;
     if (section == 'live') {
       // Live channels open the way YouTube plays a video: inline at the top
       // with the rest of the channels scrollable underneath, not straight
@@ -342,13 +365,23 @@ class _HomeTabState extends State<HomeTab> {
     final status = widget.license!.localStatus();
     if (!status.valid) return const SizedBox.shrink();
     final msLeft = status.expiresAt - DateTime.now().millisecondsSinceEpoch;
+    if (msLeft <= 0) return const SizedBox.shrink();
     final daysLeft = (msLeft / 86400000).ceil();
     final warn = daysLeft <= 7;
-    // On the actual last day, "1d left" doesn't tell the user how much of
-    // that day is actually left — could be 23 hours or 20 minutes. Once
-    // there's under 24h on the clock, count down in hours instead so it
-    // reads "23h", "2h", etc. right up to expiry.
-    final timeLabel = msLeft < 86400000 ? '${(msLeft / 3600000).ceil().clamp(1, 23)}h' : '${daysLeft}d';
+    // Under 24h: show hours. Under 1h: live h:mm:ss countdown that ticks
+    // every second (see _armCountdownIfNeeded which forces a rebuild).
+    String timeLabel;
+    if (msLeft < 3600000) {
+      final totalSec = (msLeft / 1000).floor();
+      final h = totalSec ~/ 3600;
+      final m = (totalSec % 3600) ~/ 60;
+      final s = totalSec % 60;
+      timeLabel = '${h}h ${m.toString().padLeft(2, '0')}m ${s.toString().padLeft(2, '0')}s';
+    } else if (msLeft < 86400000) {
+      timeLabel = '${(msLeft / 3600000).ceil().clamp(1, 23)}h';
+    } else {
+      timeLabel = '${daysLeft}d';
+    }
     final label = status.isTrial
         ? (warn ? 'TRIAL · $timeLabel' : 'TRIAL')
         : (warn ? 'PRO · $timeLabel' : 'PRO');
@@ -359,7 +392,7 @@ class _HomeTabState extends State<HomeTab> {
         onTap: () => showPlansSheet(context, widget.license!),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(color: color.withOpacity(.15), borderRadius: BorderRadius.circular(20), border: Border.all(color: color)),
+          decoration: BoxDecoration(color: color.withValues(alpha: .15), borderRadius: BorderRadius.circular(20), border: Border.all(color: color)),
           child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
         ),
       ),
@@ -446,7 +479,15 @@ class _HomeTabState extends State<HomeTab> {
             onPageChanged: (i) => setState(() => heroIndex = i),
             itemBuilder: (context, i) {
               final it = hero[i];
-              return GestureDetector(
+              return Focus(
+                onKeyEvent: (node, event) {
+                  if (event is KeyDownEvent && (event.logicalKey == LogicalKeyboardKey.select || event.logicalKey == LogicalKeyboardKey.enter)) {
+                    _openItem(it);
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: GestureDetector(
                 onTap: () => _openItem(it),
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -460,7 +501,7 @@ class _HomeTabState extends State<HomeTab> {
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                            colors: [Colors.transparent, Colors.black.withOpacity(.85)],
+                            colors: [Colors.transparent, Colors.black.withValues(alpha: .85)],
                             stops: const [0.4, 1],
                           ),
                         ),
@@ -487,7 +528,8 @@ class _HomeTabState extends State<HomeTab> {
                                 const SizedBox(width: 10),
                                 OutlinedButton.icon(
                                   onPressed: () async {
-                                    await widget.state.toggleFavorite(section, it);
+                                    try { await widget.state.toggleFavorite(section, it); } catch (_) {}
+                                    if (!mounted) return;
                                     setState(() {});
                                   },
                                   style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white24), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)),
@@ -502,6 +544,7 @@ class _HomeTabState extends State<HomeTab> {
                     ],
                   ),
                 ),
+              ),
               );
             },
             ),
@@ -510,7 +553,7 @@ class _HomeTabState extends State<HomeTab> {
             bottom: 8, left: 0, right: 0,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(hero.length.clamp(0, 20), (i) => Container(
+              children: List.generate(hero.length, (i) => Container(
                     width: i == heroIndex ? 16 : 5, height: 5,
                     margin: const EdgeInsets.symmetric(horizontal: 2),
                     decoration: BoxDecoration(color: i == heroIndex ? AppColors.accent : Colors.white38, borderRadius: BorderRadius.circular(3)),
@@ -571,14 +614,38 @@ class _ItemCard extends StatefulWidget {
 }
 
 class _ItemCardState extends State<_ItemCard> {
+  final _focusNode = FocusNode();
+  bool _focused = false;
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final it = widget.item;
     final faved = widget.state.isFavorite(widget.section, it);
-    return GestureDetector(
+    return Focus(
+      focusNode: _focusNode,
+      onFocusChange: (f) { if (mounted) setState(() => _focused = f); },
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent && (event.logicalKey == LogicalKeyboardKey.select || event.logicalKey == LogicalKeyboardKey.enter)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
       onTap: widget.onTap,
-      child: Container(
-        decoration: BoxDecoration(color: AppColors.bg2, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+      child: AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      decoration: BoxDecoration(
+        color: AppColors.bg2,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _focused ? AppColors.accent : AppColors.border, width: _focused ? 2 : 1),
+      ),
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -593,12 +660,13 @@ class _ItemCardState extends State<_ItemCard> {
                     top: 6, right: 6,
                     child: GestureDetector(
                       onTap: () async {
-                        await widget.state.toggleFavorite(widget.section, it);
+                        try { await widget.state.toggleFavorite(widget.section, it); } catch (_) {}
+                        if (!mounted) return;
                         setState(() {});
                       },
                       child: Container(
                         width: 26, height: 26,
-                        decoration: BoxDecoration(color: Colors.black.withOpacity(.55), shape: BoxShape.circle),
+                        decoration: BoxDecoration(color: Colors.black.withValues(alpha: .55), shape: BoxShape.circle),
                         child: Icon(faved ? Icons.favorite : Icons.favorite_border, size: 14, color: faved ? const Color(0xFFFF5D7A) : Colors.white),
                       ),
                     ),
@@ -613,12 +681,13 @@ class _ItemCardState extends State<_ItemCard> {
           ],
         ),
       ),
+      ),
     );
   }
 
   Widget _badge(String text) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(color: Colors.black.withOpacity(.6), borderRadius: BorderRadius.circular(5)),
+        decoration: BoxDecoration(color: Colors.black.withValues(alpha: .6), borderRadius: BorderRadius.circular(5)),
         child: Text(text, style: const TextStyle(fontSize: 10, color: Colors.white)),
       );
 }

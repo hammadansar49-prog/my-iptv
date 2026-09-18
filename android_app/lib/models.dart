@@ -27,8 +27,8 @@ class Account {
       };
 
   factory Account.fromJson(Map<String, dynamic> j) => Account(
-        id: j['id'],
-        type: j['type'],
+        id: '${j['id'] ?? ''}',
+        type: '${j['type'] ?? 'xtream'}',
         name: j['name'] ?? '',
         url: j['url'] ?? '',
         username: j['username'] ?? '',
@@ -232,7 +232,7 @@ class DownloadItem {
       };
 
   factory DownloadItem.fromJson(Map<String, dynamic> j) => DownloadItem(
-        id: j['id'],
+        id: j['id'] ?? 'dl_${DateTime.now().millisecondsSinceEpoch}',
         url: j['url'] ?? '',
         title: j['title'] ?? '',
         subtitle: j['subtitle'] ?? '',
@@ -287,7 +287,7 @@ class HistoryEntry {
       };
 
   factory HistoryEntry.fromJson(Map<String, dynamic> j) => HistoryEntry(
-        key: j['key'],
+        key: j['key'] ?? '',
         type: j['type'] ?? '',
         title: j['title'] ?? '',
         subtitle: j['subtitle'] ?? '',
@@ -316,12 +316,20 @@ class FavoriteEntry {
 
   factory FavoriteEntry.fromJson(Map<String, dynamic> j) {
     final section = j['section'];
-    final raw = Map<String, dynamic>.from(j['item']);
+    final raw = j['item'];
+    if (raw == null || raw is! Map) {
+      return FavoriteEntry(
+        key: j['key'] ?? '',
+        section: section ?? '',
+        item: PlayableItem(id: '', name: 'Unknown'),
+      );
+    }
+    final map = Map<String, dynamic>.from(raw);
     final item = section == 'live'
-        ? PlayableItem.fromLive(raw)
+        ? PlayableItem.fromLive(map)
         : section == 'movies'
-            ? PlayableItem.fromVod(raw)
-            : PlayableItem.fromSeries(raw);
-    return FavoriteEntry(key: j['key'], section: section, item: item);
+            ? PlayableItem.fromVod(map)
+            : PlayableItem.fromSeries(map);
+    return FavoriteEntry(key: j['key'] ?? '', section: section, item: item);
   }
 }

@@ -40,50 +40,56 @@ Future<void> maybeShowAnnouncement(BuildContext context, LicenseService license)
 
   await showDialog(
     context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setState) => AlertDialog(
-        backgroundColor: AppColors.bg2,
-        title: Text(data['title']?.toString().isNotEmpty == true ? data['title'].toString() : 'Announcement'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(data['text'].toString()),
-              if (collectFeedback) ...[
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(5, (i) => IconButton(
-                        padding: EdgeInsets.zero,
-                        icon: Icon(i < rating ? Icons.star : Icons.star_border, color: AppColors.accent),
-                        onPressed: () => setState(() => rating = i + 1),
-                      )),
-                ),
-                if (rating > 0)
-                  TextField(
-                    controller: commentController,
-                    maxLines: 2,
-                    decoration: const InputDecoration(isDense: true, hintText: 'Add a comment (optional)'),
-                  ),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          if (collectFeedback && rating > 0)
-            TextButton(
-              onPressed: () async {
-                await license.submitAnnouncementReview(rating: rating, comment: commentController.text, announcementCreatedAt: createdAt);
-                if (ctx.mounted) Navigator.of(ctx).pop();
-              },
-              child: const Text('Submit'),
+    builder: (_) {
+      return StatefulBuilder(
+        builder: (ctx, setState) {
+          return AlertDialog(
+            backgroundColor: AppColors.bg2,
+            title: Text(data['title']?.toString().isNotEmpty == true ? data['title'].toString() : 'Announcement'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text((data['text']?.toString() ?? '')),
+                  if (collectFeedback) ...[
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(5, (i) => IconButton(
+                            padding: EdgeInsets.zero,
+                            icon: Icon(i < rating ? Icons.star : Icons.star_border, color: AppColors.accent),
+                            onPressed: () => setState(() => rating = i + 1),
+                          )),
+                    ),
+                    if (rating > 0)
+                      TextField(
+                        controller: commentController,
+                        maxLines: 2,
+                        decoration: const InputDecoration(isDense: true, hintText: 'Add a comment (optional)'),
+                      ),
+                  ],
+                ],
+              ),
             ),
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close')),
-        ],
-      ),
-    ),
-  );
+            actions: [
+              if (collectFeedback && rating > 0)
+                TextButton(
+                  onPressed: () async {
+                    try {
+                      await license.submitAnnouncementReview(rating: rating, comment: commentController.text, announcementCreatedAt: createdAt);
+                    } catch (_) {}
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                  },
+                  child: const Text('Submit'),
+                ),
+              TextButton(onPressed: () { Navigator.of(ctx).pop(); }, child: const Text('Close')),
+            ],
+          );
+        },
+      );
+    },
+  ).then((_) => commentController.dispose());
 
   if (createdAt != 0) await Storage.p.setInt('announcementDismissed', createdAt);
 }

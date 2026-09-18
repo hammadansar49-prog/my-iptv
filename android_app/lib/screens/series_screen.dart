@@ -20,6 +20,11 @@ class _SeriesScreenState extends State<SeriesScreen> {
   String? error;
   String? selectedSeason;
 
+  /// Cached playlist for the currently-selected season so switching tabs or
+  /// rebuilding the tree (downloads listener, etc.) doesn't regenerate it.
+  String? _cachedSeason;
+  List<PlayRequest>? _cachedPlaylist;
+
   @override
   void initState() {
     super.initState();
@@ -41,7 +46,10 @@ class _SeriesScreenState extends State<SeriesScreen> {
       error = null;
     });
     try {
-      final data = await widget.state.client!.getSeriesInfo(widget.series.id);
+      final data = await (widget.state.client?.getSeriesInfo(widget.series.id) ?? Future.error('Not logged in'));
+      _cachedSeason = null;
+      _cachedPlaylist = null;
+      if (!mounted) return;
       setState(() {
         info = data;
         loading = false;
@@ -51,6 +59,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
         }
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         loading = false;
         error = e is XtreamException ? e.message : 'Could not load series info.';
@@ -78,13 +87,42 @@ class _SeriesScreenState extends State<SeriesScreen> {
   }
 
   List<Map<String, dynamic>> _episodesOf(String season) {
-    final raw = ((info?['episodes'] as Map?)?[season] as List?) ?? [];
-    return raw.map((e) => Map<String, dynamic>.from(e)).toList();
+    final episodesMap = info?['episodes'];
+    if (episodesMap is! Map) return const [];
+    // Try the exact key first; some providers store season keys with
+    // leading zeros ("01") while the chip displays "1".
+    dynamic raw = episodesMap[season];
+    raw ??= episodesMap[season.toString().padLeft(2, '0')];
+    raw ??= episodesMap[int.tryParse(season)];
+    if (raw is List) {
+      return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    }
+    return const [];
+  }
+
+  /// Build (and cache) the playlist for [season]. Reuses the cached version
+  /// on subsequent builds when the season hasn't changed — avoids
+  /// regenerating the whole list (and its circular self-references) on every
+  /// download-listener rebuild or season-chip tap.
+  List<PlayRequest> _playlistFor(String season) {
+    if (_cachedSeason == season && _cachedPlaylist != null) return _cachedPlaylist!;
+    final episodes = _episodesOf(season);
+    final list = List.generate(episodes.length, (i) => _episodeRequest(episodes[i], season, episodes, i, const []));
+    for (var idx = 0; idx < list.length; idx++) {
+      list[idx] = PlayRequest(
+        url: list[idx].url, isLive: false, type: list[idx].type, title: list[idx].title,
+        subtitle: list[idx].subtitle, thumb: list[idx].thumb, historyKey: list[idx].historyKey,
+        resumeAt: list[idx].resumeAt, playlist: list, playlistIndex: idx,
+      );
+    }
+    _cachedSeason = season;
+    _cachedPlaylist = list;
+    return list;
   }
 
   PlayRequest _episodeRequest(Map<String, dynamic> ep, String season, List<Map<String, dynamic>> siblings, int index, List<PlayRequest> playlist) {
     final ext = ep['container_extension'] ?? 'mp4';
-    final url = widget.state.client!.seriesEpisodeUrl('${ep['id']}', ext: ext);
+    final url = widget.state.client?.seriesEpisodeUrl('${ep['id']}', ext: ext) ?? '';
     final req = PlayRequest(
       url: url,
       isLive: false,
@@ -110,16 +148,10 @@ class _SeriesScreenState extends State<SeriesScreen> {
       return const Center(child: Text('No episodes found.', style: TextStyle(color: AppColors.textDim)));
     }
 
-    final episodes = _episodesOf(selectedSeason!);
-    final playlist = List.generate(episodes.length, (i) => _episodeRequest(episodes[i], selectedSeason!, episodes, i, const []));
-    // playlist entries reference themselves circularly for auto-next; patch it in.
-    for (final r in playlist) {
-      final idx = playlist.indexOf(r);
-      playlist[idx] = PlayRequest(
-        url: r.url, isLive: false, type: r.type, title: r.title, subtitle: r.subtitle, thumb: r.thumb,
-        historyKey: r.historyKey, resumeAt: r.resumeAt, playlist: playlist, playlistIndex: idx,
-      );
-    }
+    final season = selectedSeason;
+    if (season == null) return const Center(child: Text('No season selected.', style: TextStyle(color: AppColors.textDim)));
+    final episodes = _episodesOf(season);
+    final playlist = _playlistFor(season);
 
     // The series' own most-recently-touched episode (if any), so a "Resume:
     // Episode X" / "Start New" pair can be offered instead of making the
@@ -137,15 +169,22 @@ class _SeriesScreenState extends State<SeriesScreen> {
       final firstSeason = seasons.first;
       final eps = _episodesOf(firstSeason);
       if (eps.isEmpty) return;
-      final req = _episodeRequest(eps.first, firstSeason, eps, 0, const []);
+      final pl = _playlistFor(firstSeason);
+      final req = pl[0];
       if (resumeAt == 0) req.resumeAt = 0;
       widget.state.launchPlayer(req);
     }
 
     void resumeLastWatched() {
-      final req = PlayRequest(
-        url: lastWatched!.url, isLive: false, type: 'episode', title: lastWatched.title, subtitle: lastWatched.subtitle,
-        thumb: lastWatched.thumb, historyKey: lastWatched.key, resumeAt: lastWatched.resumeAt,
+      final epSeason = RegExp(r'Season\s+(\S+)', caseSensitive: false).firstMatch(lastWatched!.subtitle);
+      final seasonKey = epSeason?.group(1) ?? seasons.first;
+      final pl = _playlistFor(seasonKey);
+      final matchIdx = pl.indexWhere((r) => r.historyKey == lastWatched.key);
+      final lw = lastWatched;
+      final req = matchIdx >= 0 ? pl[matchIdx] : PlayRequest(
+        url: lw.url, isLive: false, type: 'episode', title: lw.title, subtitle: lw.subtitle,
+        thumb: lw.thumb, historyKey: lw.key, resumeAt: lw.resumeAt,
+        playlist: pl, playlistIndex: matchIdx >= 0 ? matchIdx : 0,
       );
       widget.state.launchPlayer(req);
     }
@@ -320,9 +359,11 @@ class _SeriesScreenState extends State<SeriesScreen> {
   }
 
   void _downloadSeason(List<Map<String, dynamic>> episodes) {
+    final season = selectedSeason;
+    if (season == null) return;
     int added = 0;
     for (var i = 0; i < episodes.length; i++) {
-      final req = _episodeRequest(episodes[i], selectedSeason!, episodes, i, const []);
+      final req = _episodeRequest(episodes[i], season, episodes, i, const []);
       if (widget.state.downloads.byUrl(req.url) == null) {
         widget.state.downloads.add(url: req.url, title: req.title, subtitle: req.subtitle, type: 'episode', thumb: req.thumb);
         added++;

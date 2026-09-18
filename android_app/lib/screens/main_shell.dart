@@ -50,31 +50,34 @@ class _MainShellState extends State<MainShell> {
     if (license != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
-        await maybeShowUpdate(context, license);
-        _lastUpdateSignature = await _updateSignature(license);
+        try {
+          await maybeShowUpdate(context, license);
+        } catch (_) {}
         if (!mounted) return;
-        await maybeShowAnnouncement(context, license);
-        if (!mounted) return;
-        await _maybeShowExpiryPaywall(license);
+        try {
+          await maybeShowAnnouncement(context, license);
+        } catch (_) {}
+        try {
+          await _maybeShowExpiryPaywall(license);
+        } catch (_) {}
       });
       // Live push (see LicenseService.startLiveUpdates, armed once at app
       // boot in main.dart): an admin publishing a new announcement or update
       // while the app is already open reaches it within moments instead of
       // only being picked up on the next cold start.
-      _annSub = license.announcementUpdates.listen((_) {
-        if (mounted) maybeShowAnnouncement(context, license);
+      _annSub = license.announcementUpdates.listen((_) async {
+        try { if (mounted) await maybeShowAnnouncement(context, license); } catch (_) {}
       });
       _updSub = license.updateUpdates.listen((result) async {
-        final sig = _signatureOf(result);
-        if (sig == _lastUpdateSignature) return;
-        _lastUpdateSignature = sig;
-        if (result['available'] == true && mounted) await maybeShowUpdate(context, license);
+        try {
+          final sig = _signatureOf(result);
+          if (sig == _lastUpdateSignature) return;
+          _lastUpdateSignature = sig;
+          if (result['available'] == true && mounted) await maybeShowUpdate(context, license);
+        } catch (_) {}
       });
     }
   }
-
-  String _signatureOf(Map<String, dynamic> r) => '${r['available']}|${r['latestVersion']}|${r['forceUpdate']}';
-  Future<String> _updateSignature(LicenseService license) async => _signatureOf(await license.checkForUpdate());
 
   @override
   void dispose() {
@@ -85,6 +88,8 @@ class _MainShellState extends State<MainShell> {
   }
 
   void _onDownloadsChanged() { if (mounted) setState(() {}); }
+
+  String _signatureOf(Map<String, dynamic> r) => '${r['available']}|${r['latestVersion']}|${r['forceUpdate']}';
 
   DateTime? _lastBackPress;
 
@@ -136,7 +141,7 @@ class _MainShellState extends State<MainShell> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: tabIndex,
         backgroundColor: AppColors.bg2,
-        indicatorColor: AppColors.accent.withOpacity(.22),
+        indicatorColor: AppColors.accent.withValues(alpha: .22),
         onDestinationSelected: (i) => setState(() => tabIndex = i),
         destinations: [
           const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../license.dart';
 import '../theme.dart';
@@ -17,8 +18,8 @@ Future<void> maybeShowUpdate(
   // silent launch-time check (main_shell.dart) deliberately doesn't want.
   bool force = false,
   bool announceIfCurrent = false,
-}) async {
-  final result = await license.checkForUpdate(force: force);
+  }) async {
+  final result = await license.checkForUpdate(force: force).catchError((_) => <String, dynamic>{'available': false});
   if (result['available'] != true) {
     if (announceIfCurrent && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -58,8 +59,17 @@ Future<void> maybeShowUpdate(
         ),
         actions: [
           if (!forceUpdate) TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Later')),
+          if (forceUpdate && downloadUrl.isEmpty)
+            TextButton(onPressed: () => exit(0), child: const Text('Exit App')),
           ElevatedButton(
-            onPressed: downloadUrl.isEmpty ? null : () => license.openUpdateLink(downloadUrl),
+            onPressed: downloadUrl.isEmpty ? null : () async {
+              final ok = await license.openUpdateLink(downloadUrl);
+              if (!ok && ctx.mounted) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text("Couldn't open the update link. Please check your browser.")),
+                );
+              }
+            },
             child: const Text('Update Now'),
           ),
         ],

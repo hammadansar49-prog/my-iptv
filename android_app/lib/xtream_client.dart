@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart' hide Category;
 import 'package:http/http.dart' as http;
+import 'cache_manager.dart';
 import 'models.dart';
 
 class XtreamException implements Exception {
@@ -57,10 +57,19 @@ class XtreamClient {
   final String username;
   final String password;
 
-  /// Where full lists are kept between launches (see [_cachedBytes]).
-  final Directory? cacheDir;
+  /// Persistent disk cache for catalog JSON blobs (see [_cachedBytes]).
+  final DiskCache? diskCache;
 
-  XtreamClient({required String baseUrl, required this.username, required this.password, this.cacheDir})
+  /// In-flight requests to prevent concurrent network calls for the same key.
+  /// Keyed by `baseUrl_username_action` so two different accounts don't share
+  /// a pending request (which would cause account A's data to be served to B).
+  static final Map<String, Future<Uint8List>> _pendingRequests = {};
+
+  /// In-memory cache for series info (series_id -> parsed data). Avoids a
+  /// network round-trip every time the user taps the same series twice.
+  final Map<String, Map<String, dynamic>> _seriesInfoCache = {};
+
+  XtreamClient({required String baseUrl, required this.username, required this.password, this.diskCache})
       : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), '');
 
   static const _catalogTtl = Duration(minutes: 10);
@@ -75,7 +84,7 @@ class XtreamClient {
     return Uri.parse('$baseUrl/player_api.php').replace(queryParameters: params);
   }
 
-  Future<Uint8List> _getBytes(Uri uri, {Duration timeout = const Duration(seconds: 60)}) async {
+  Future<Uint8List> _getBytes(Uri uri, {Duration timeout = const Duration(seconds: 15)}) async {
     http.Response res;
     try {
       res = await http.get(uri, headers: {'User-Agent': 'IPTVPlayer/1.0', 'Accept-Encoding': 'gzip'}).timeout(timeout);
@@ -84,6 +93,18 @@ class XtreamClient {
     }
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw XtreamException('Server returned HTTP ${res.statusCode}');
+    }
+    // Proxies, captive portals and expired URLs commonly return a 200 OK
+    // with text/html (a login page, an error page, etc.) instead of the
+    // expected JSON or binary stream. Passing that straight to the player
+    // or JSON decoder produced garbled HTML text on screen or a blank
+    // player — detect it early and throw a clear, user-facing error.
+    final contentType = res.headers['content-type'] ?? '';
+    if (contentType.contains('text/html') || contentType.contains('text/plain')) {
+      final snippet = String.fromCharCodes(res.bodyBytes.take(128));
+      if (snippet.toLowerCase().contains('<!doctype') || snippet.toLowerCase().contains('<html')) {
+        throw XtreamException('Server returned an error page instead of data. The URL may have expired or the server is misconfigured.');
+      }
     }
     return res.bodyBytes;
   }
@@ -101,38 +122,39 @@ class XtreamClient {
   // relaunching the app, or coming back to it, doesn't download the whole
   // catalog again. An empty or failed answer is never stored — serving that
   // later is how a section ended up showing "0 items".
-  File? _cacheFile(String key) {
-    final dir = cacheDir;
-    if (dir == null) return null;
-    final safe = '${baseUrl.hashCode}_${username.hashCode}_$key'.replaceAll(RegExp(r'[^A-Za-z0-9_\-]'), '_');
-    return File('${dir.path}/catalog_$safe.json');
-  }
+  String _cacheKey(String key) => '${baseUrl.hashCode}_${username.hashCode}_$key';
+
+  /// Pending-request key scoped to this client instance so two accounts
+  /// fetching the same action simultaneously don't share an in-flight Future.
+  String _pendingKey(String action) => '${baseUrl}_${username}_$action';
 
   Future<Uint8List> _cachedBytes(String key, Uri uri, {bool force = false}) async {
-    final file = _cacheFile(key);
-    if (file != null && !force) {
+    if (diskCache != null && !force) {
       try {
-        if (await file.exists()) {
-          final age = DateTime.now().difference(await file.lastModified());
-          if (age < _catalogTtl) return await file.readAsBytes();
-        }
+        final cached = await diskCache!.get(_cacheKey(key), ttl: _catalogTtl);
+        if (cached != null && cached.length > 2) return cached;
       } catch (_) {/* fall through to the network */}
     }
-    final bytes = await _getBytes(uri);
-    if (file != null && bytes.length > 2) {
-      file.writeAsBytes(bytes, flush: false).catchError((_) => file);
-    }
-    return bytes;
+    // Return existing in-flight request if one is already running for this key
+    final pk = _pendingKey(key);
+    if (_pendingRequests.containsKey(pk)) return _pendingRequests[pk]!;
+    final future = _getBytes(uri).then((bytes) {
+      _pendingRequests.remove(pk);
+      if (diskCache != null && bytes.length > 2) {
+        diskCache!.put(_cacheKey(key), bytes);
+      }
+      return bytes;
+    }).catchError((e, st) {
+      _pendingRequests.remove(pk);
+      return Future<Uint8List>.error(e, st);
+    });
+    _pendingRequests[pk] = future;
+    return future;
   }
 
   Future<void> clearCatalogCache() async {
-    final dir = cacheDir;
-    if (dir == null) return;
-    try {
-      await for (final f in dir.list()) {
-        if (f is File && f.path.contains('catalog_')) await f.delete();
-      }
-    } catch (_) {}
+    _seriesInfoCache.clear();
+    await diskCache?.clear();
   }
 
   Future<Map<String, dynamic>> authenticate() async {
@@ -179,9 +201,13 @@ class XtreamClient {
       _items('get_series', 'series', categoryId, force: force);
 
   Future<Map<String, dynamic>?> getSeriesInfo(String seriesId) async {
+    final cached = _seriesInfoCache[seriesId];
+    if (cached != null) return cached;
     final data = await _get(_api('get_series_info', {'series_id': seriesId}));
     if (data is! Map) return null;
-    return Map<String, dynamic>.from(data);
+    final result = Map<String, dynamic>.from(data);
+    _seriesInfoCache[seriesId] = result;
+    return result;
   }
 
   /// Now / next programme for one channel. Titles arrive base64-encoded.

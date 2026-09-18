@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../app_state.dart';
 import '../artwork.dart';
 import '../models.dart';
@@ -103,10 +104,18 @@ class _EpgTabState extends State<EpgTab> {
         maxCrossAxisExtent: 220, childAspectRatio: 16 / 11, crossAxisSpacing: 10, mainAxisSpacing: 10,
       ),
       itemCount: list.length,
-      itemBuilder: (context, i) {
+        itemBuilder: (context, i) {
         final ch = list[i];
         final faved = widget.state.isFavorite('live', ch);
-        return GestureDetector(
+        return Focus(
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent && (event.logicalKey == LogicalKeyboardKey.select || event.logicalKey == LogicalKeyboardKey.enter)) {
+              _play(ch);
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          child: GestureDetector(
           onTap: () => _play(ch),
           child: Container(
             decoration: cardDecoration(radius: 10),
@@ -118,7 +127,7 @@ class _EpgTabState extends State<EpgTab> {
                   left: 0, right: 0, bottom: 0,
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withOpacity(.85)])),
+                    decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withValues(alpha: .85)])),
                     child: Text(ch.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                   ),
                 ),
@@ -127,12 +136,13 @@ class _EpgTabState extends State<EpgTab> {
                   child: Row(children: [
                     _miniIcon(Icons.schedule, () => _showEpg(ch)),
                     const SizedBox(width: 4),
-                    _miniIcon(faved ? Icons.favorite : Icons.favorite_border, () async { await widget.state.toggleFavorite('live', ch); setState(() {}); }, color: faved ? const Color(0xFFFF5D7A) : Colors.white),
+                    _miniIcon(faved ? Icons.favorite : Icons.favorite_border, () async { await widget.state.toggleFavorite('live', ch); if (!mounted) return; setState(() {}); }, color: faved ? const Color(0xFFFF5D7A) : Colors.white),
                   ]),
                 ),
               ],
             ),
           ),
+        ),
         );
       },
     );
@@ -143,7 +153,7 @@ class _EpgTabState extends State<EpgTab> {
       onTap: onTap,
       child: Container(
         width: 26, height: 26,
-        decoration: BoxDecoration(color: Colors.black.withOpacity(.55), shape: BoxShape.circle),
+        decoration: BoxDecoration(color: Colors.black.withValues(alpha: .55), shape: BoxShape.circle),
         child: Icon(icon, size: 13, color: color),
       ),
     );
@@ -167,7 +177,9 @@ class _EpgSheetState extends State<_EpgSheet> {
   @override
   void initState() {
     super.initState();
-    widget.state.client!.getShortEpg(widget.channel.id, limit: 4).then((list) {
+    final client = widget.state.client;
+    if (client == null) { if (mounted) setState(() => failed = true); return; }
+    client.getShortEpg(widget.channel.id, limit: 4).then((list) {
       if (mounted) setState(() => entries = list);
     }).catchError((_) {
       if (mounted) setState(() => failed = true);

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../app_state.dart';
 import '../screens/player_screen.dart';
 
@@ -24,6 +25,11 @@ class FloatingPlayer extends StatelessWidget {
         return ValueListenableBuilder<bool>(
           valueListenable: state.playerMini,
           builder: (context, mini, __) {
+            // PlayerScreen uses a GlobalKey so its State (and the underlying
+            // media_kit Player/connection) survives across rebuilds — only
+            // didUpdateWidget fires when mini changes, never a full
+            // dispose+initState.  The Navigator wrapping provides the Overlay
+            // that PlayerScreen's bottom sheets / popups need.
             final player = PlayerScreen(
               key: launch.playerKey,
               state: state,
@@ -32,8 +38,17 @@ class FloatingPlayer extends StatelessWidget {
               favItem: launch.favItem,
               mini: mini,
             );
-            if (!mini) return Positioned.fill(child: player);
-            return _DraggableMini(child: player);
+            final wrapped = Navigator(
+              onGenerateRoute: (settings) => PageRouteBuilder(
+                opaque: false,
+                pageBuilder: (context, animation, secondaryAnimation) => player,
+              ),
+            );
+            if (!mini) return Positioned.fill(child: wrapped);
+            return _DraggableMini(
+              onExpand: () { state.playerMini.value = false; },
+              child: wrapped,
+            );
           },
         );
       },
@@ -47,7 +62,8 @@ class FloatingPlayer extends StatelessWidget {
 /// being persisted anywhere.
 class _DraggableMini extends StatefulWidget {
   final Widget child;
-  const _DraggableMini({required this.child});
+  final VoidCallback onExpand;
+  const _DraggableMini({required this.child, required this.onExpand});
 
   @override
   State<_DraggableMini> createState() => _DraggableMiniState();
@@ -72,14 +88,23 @@ class _DraggableMiniState extends State<_DraggableMini> {
           top: pos.dy,
           width: _w,
           height: _h,
-          child: GestureDetector(
-            onPanUpdate: (d) => setState(() => _topLeft = pos + d.delta),
-            child: Material(
-              elevation: 10,
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-              clipBehavior: Clip.antiAlias,
-              child: widget.child,
+          child: Focus(
+            onKeyEvent: (node, event) {
+              if (event is KeyDownEvent && (event.logicalKey == LogicalKeyboardKey.select || event.logicalKey == LogicalKeyboardKey.enter)) {
+                widget.onExpand();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            },
+            child: GestureDetector(
+              onPanUpdate: (d) => setState(() => _topLeft = pos + d.delta),
+              child: Material(
+                elevation: 10,
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                clipBehavior: Clip.antiAlias,
+                child: widget.child,
+              ),
             ),
           ),
         );

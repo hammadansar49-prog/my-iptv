@@ -18,14 +18,18 @@ class AppNotifications {
   static Future<void> init({VoidCallback? onTapped}) async {
     _onAnnouncementTapped = onTapped;
     if (_inited) return;
-    _inited = true;
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    await _plugin.initialize(
-      const InitializationSettings(android: androidInit),
-      onDidReceiveNotificationResponse: (response) {
-        if (response.payload == 'announcement') _onAnnouncementTapped?.call();
-      },
-    );
+    try {
+      const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+      await _plugin.initialize(
+        const InitializationSettings(android: androidInit),
+        onDidReceiveNotificationResponse: (response) {
+          if (response.payload == 'announcement') _onAnnouncementTapped?.call();
+        },
+      );
+      _inited = true;
+    } catch (_) {
+      return;
+    }
     try {
       await _plugin
           .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
@@ -43,7 +47,7 @@ class AppNotifications {
     );
     try {
       await _plugin.show(
-        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        DateTime.now().millisecondsSinceEpoch,
         title,
         body,
         const NotificationDetails(android: androidDetails),

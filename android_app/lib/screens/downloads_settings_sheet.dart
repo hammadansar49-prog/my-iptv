@@ -18,6 +18,7 @@ class _DownloadsSettingsSheetState extends State<DownloadsSettingsSheet> {
     final path = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Choose where downloads are saved');
     if (path == null) return;
     final err = await widget.state.downloads.setDir(path);
+    if (!mounted) return;
     setState(() => error = err);
     if (err == null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download folder changed.')));
@@ -66,7 +67,11 @@ class _DownloadsSettingsSheetState extends State<DownloadsSettingsSheet> {
                 style: TextStyle(color: AppColors.textDim, fontSize: 11),
               ),
               value: d.whileWatching,
-              onChanged: (v) async { await d.setWhileWatching(v); setState(() {}); },
+              onChanged: (v) async {
+                try { await d.setWhileWatching(v); } catch (_) {}
+                if (!mounted) return;
+                setState(() {});
+              },
             ),
           ],
         ),

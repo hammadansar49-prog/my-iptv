@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' hide Category;
 import 'package:flutter/widgets.dart' show GlobalKey;
 import 'package:path_provider/path_provider.dart';
+import 'cache_manager.dart';
 import 'downloads.dart';
 import 'models.dart';
 import 'storage.dart';
@@ -46,7 +47,15 @@ class AppState extends ChangeNotifier {
   String subtitleLang = '';         // last subtitle language picked ('' = off)
   String passcode = '';             // app lock ('' = off)
 
-  // Shared across Home/Profile/EPG so nothing gets fetched twice.
+  // Professional two-tier cache: Memory L1 + Disk L2 with LRU eviction.
+  CacheManager? _cache;
+  CacheManager get cache {
+    final c = _cache;
+    if (c == null) throw StateError('Cache not initialized — getApplicationSupportDirectory() may have failed.');
+    return c;
+  }
+
+  // In-memory maps backed by CacheManager's MemoryCache (LRU + TTL).
   final Map<String, List<Category>> catCache = {};
   final Map<String, List<PlayableItem>> itemCache = {};
 
@@ -57,6 +66,7 @@ class AppState extends ChangeNotifier {
     try {
       _cacheDir = await getApplicationSupportDirectory();
     } catch (_) {}
+    if (_cacheDir != null) _cache = CacheManager(cacheDir: _cacheDir!);
     history = Storage.getHistory();
     favorites = Storage.getFavorites();
     quality = Storage.str('quality', 'auto');
@@ -107,17 +117,24 @@ class AppState extends ChangeNotifier {
     } else {
       list.insert(0, acc);
     }
+    // Save password to secure storage (never in SharedPreferences JSON).
+    if (acc.password.isNotEmpty) {
+      await Storage.savePassword(acc.id, acc.password);
+    }
     await Storage.saveAccounts(list);
   }
 
   Future<void> removeAccount(String id) async {
     final list = Storage.getAccounts()..removeWhere((a) => a.id == id);
     await Storage.saveAccounts(list);
+    await Storage.deletePassword(id);
     notifyListeners();
   }
 
   Future<void> login(Account acc) async {
-    final c = XtreamClient(baseUrl: acc.url, username: acc.username, password: acc.password, cacheDir: _cacheDir);
+    // Read password from secure storage (migrated from plaintext on first init).
+    final password = await Storage.getPassword(acc.id);
+    final c = XtreamClient(baseUrl: acc.url, username: acc.username, password: password, diskCache: _cache?.disk);
     final auth = await c.authenticate(); // throws XtreamException on failure
     if (activeAccount?.id != acc.id) {
       catCache.clear();
@@ -149,6 +166,7 @@ class AppState extends ChangeNotifier {
     authInfo = null;
     catCache.clear();
     itemCache.clear();
+    await _cache?.clearAll();
     await Storage.setActiveAccountId(null);
     notifyListeners();
   }
@@ -158,6 +176,7 @@ class AppState extends ChangeNotifier {
   Future<void> refreshCatalog() async {
     catCache.clear();
     itemCache.clear();
+    _cache?.clearMemory();
     await client?.clearCatalogCache();
     notifyListeners();
   }
@@ -165,9 +184,16 @@ class AppState extends ChangeNotifier {
   /// The full list for a section, from memory, the disk cache or the network.
   Future<List<PlayableItem>> sectionItems(String section, {String? categoryId, bool force = false}) async {
     final key = '$section:${categoryId ?? 'all'}';
+
+    // L1: in-memory cache (LRU + TTL)
+    if (!force && _cache != null) {
+      final cachedMem = _cache!.items.get(key);
+      if (cachedMem != null && cachedMem.isNotEmpty) return cachedMem.whereType<PlayableItem>().toList();
+    }
     final cached = itemCache[key];
     if (cached != null && cached.isNotEmpty && !force) return cached;
-    final c = client!;
+    final c = client;
+    if (c == null) throw XtreamException('Not logged in.');
     final list = section == 'live'
         ? await c.getLiveStreams(categoryId, force: force)
         : section == 'movies'
@@ -176,24 +202,44 @@ class AppState extends ChangeNotifier {
     final sorted = section == 'live' ? list : sortByRecency(list, section);
     // An empty list is not remembered: that's what a failed or cut-off
     // answer looks like, and keeping it showed "0 items" until a restart.
-    if (sorted.isNotEmpty) itemCache[key] = sorted;
+    if (sorted.isNotEmpty) {
+      itemCache[key] = sorted;
+      _cache?.items.put(key, sorted);
+    }
     return sorted;
   }
 
   Future<List<Category>> sectionCategories(String section) async {
+    final key = section;
+
+    // L1: in-memory cache (LRU + TTL)
+    if (_cache != null) {
+      final cachedMem = _cache!.categories.get(key);
+      if (cachedMem != null && cachedMem.isNotEmpty) {
+        return cachedMem.whereType<Category>().toList();
+      }
+    }
     final cached = catCache[section];
     if (cached != null && cached.isNotEmpty) return cached;
-    final c = client!;
+    final c = client;
+    if (c == null) throw XtreamException('Not logged in.');
     final list = section == 'live'
         ? await c.getLiveCategories()
         : section == 'movies'
             ? await c.getVodCategories()
             : await c.getSeriesCategories();
-    if (list.isNotEmpty) catCache[section] = list;
+    if (list.isNotEmpty) {
+      catCache[section] = list;
+      _cache?.categories.put(key, list);
+    }
     return list;
   }
 
-  String liveUrl(String streamId) => client!.liveUrl(streamId, ext: liveFormat == 'ts' ? 'ts' : 'm3u8');
+  String liveUrl(String streamId) {
+    final c = client;
+    if (c == null) throw XtreamException('Not logged in.');
+    return c.liveUrl(streamId, ext: liveFormat == 'ts' ? 'ts' : 'm3u8');
+  }
 
   // ---- History ----
   HistoryEntry? findHistory(String key) {
@@ -304,8 +350,14 @@ class AppState extends ChangeNotifier {
   Completer<void>? _providerHolder;
 
   Future<void> acquireProviderSlot() async {
+    var attempts = 0;
     while (_providerHolder != null) {
-      await _providerHolder!.future;
+      if (attempts > 60) {
+        _providerHolder = null;
+        break;
+      }
+      await _providerHolder!.future.timeout(const Duration(milliseconds: 500), onTimeout: () {});
+      attempts++;
     }
     _providerHolder = Completer<void>();
   }
