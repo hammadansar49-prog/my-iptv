@@ -45,3 +45,4 @@ app.*.map.json
 /android/app/release
 analyze.log
 hs_err_pid*.log
+build*.log
