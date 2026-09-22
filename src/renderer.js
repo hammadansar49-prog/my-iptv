@@ -130,6 +130,17 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+function friendlyAuthError(message) {
+  const m = String(message || '');
+  if (/^Server returned HTTP/i.test(m) || /^Invalid username or password/i.test(m) || /^Invalid response from server/i.test(m)) {
+    return 'Invalid credentials — please check your Server URL, Username and Password and try again.';
+  }
+  if (/ETIMEDOUT|timeout/i.test(m)) return 'Could not reach the server — check your internet connection, the server may be down.';
+  if (/ENOTFOUND|getaddrinfo/i.test(m)) return 'Server address not found — please check the Server URL.';
+  if (/ECONNREFUSED/i.test(m)) return 'Connection refused by the server.';
+  return m || 'Login failed';
+}
+
 async function loginWithAccount(acc) {
   const errBox = $('#login-error');
   errBox.textContent = '';
@@ -155,14 +166,26 @@ async function loginWithAccount(acc) {
       enterAppM3U();
     }
   } catch (err) {
-    errBox.textContent = err.message || 'Login failed';
+    errBox.textContent = friendlyAuthError(err.message);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Login';
   }
 }
 
+function wirePasswordToggle(inputId, btnId) {
+  const input = document.getElementById(inputId);
+  const btn = document.getElementById(btnId);
+  if (!input || !btn) return;
+  btn.addEventListener('click', () => {
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.classList.toggle('showing', !showing);
+  });
+}
+
 function initLoginForm() {
+  wirePasswordToggle('x-pass', 'x-pass-toggle');
   $('#btn-login').addEventListener('click', async () => {
     const activeTab = $('.ltab.active').dataset.tab;
     if (activeTab === 'xtream') {
@@ -319,7 +342,7 @@ async function switchPlaylist(acc) {
   } catch (err) {
     $('#account-name').textContent = acc.name;
     $('#account-sub').textContent = 'Could not connect';
-    alert(`Could not switch to "${acc.name}": ${err.message || 'connection failed'}`);
+    alert(`Could not switch to "${acc.name}": ${friendlyAuthError(err.message)}`);
   }
 }
 
@@ -1225,7 +1248,10 @@ function renderPlaylistSettings(pane) {
         <input class="settings-input" id="pls-x-url" placeholder="http://example.com:8080" />
         <div class="pls-two">
           <input class="settings-input" id="pls-x-user" placeholder="${t('playlists.username')}" />
-          <input class="settings-input" id="pls-x-pass" placeholder="${t('playlists.password')}" type="password" />
+          <div class="pw-field">
+            <input class="settings-input" id="pls-x-pass" placeholder="${t('playlists.password')}" type="password" />
+            <button type="button" class="pw-toggle" id="pls-x-pass-toggle" tabindex="-1" title="Show/Hide password">👁</button>
+          </div>
         </div>
       </div>
       <div id="pls-form-m3u" hidden>
@@ -1236,6 +1262,8 @@ function renderPlaylistSettings(pane) {
         <span class="sr-help" id="pls-msg">${t('playlists.credentialsNote')}</span>
         <button class="btn-primary" id="pls-add">${t('playlists.addButton')}</button>
       </div>`);
+
+  wirePasswordToggle('pls-x-pass', 'pls-x-pass-toggle');
 
   pane.querySelectorAll('[data-act="use"]').forEach((b) => b.addEventListener('click', () => {
     const acc = accounts.find((a) => a.id === b.dataset.id);
@@ -1295,7 +1323,7 @@ function renderPlaylistSettings(pane) {
       if (acc.type === 'xtream') await new XtreamClient(acc.url, acc.username, acc.password).authenticate();
       else await parseM3U(acc.url);
     } catch (err) {
-      msg.textContent = `Could not connect: ${err.message || 'check the details'}`;
+      msg.textContent = `Could not connect: ${friendlyAuthError(err.message)}`;
       return;
     }
     state.store.accounts.unshift(acc);
@@ -1480,6 +1508,9 @@ function renderAboutSettings(pane) {
       <div class="pls-sub" id="ab-version">Version …</div>
       <div class="sr-help" style="margin-top:10px;">Plays your own playlists. No channels or content are provided by the app.</div>`) +
     settingsCard('Stored on this device', `<div class="sr-help" id="ab-storage">Counting…</div>`) +
+    settingsCard('Developer', `
+      <div class="sr-help">Developed by <strong>Muhammad Hammad Ansar</strong>, Full Stack Developer from Pakistan.</div>
+      <div class="sr-help" style="margin-top:6px;">This software is the property of <a href="#" id="ab-owner-link">theottdeals.com</a>. No one may use it under their own name.</div>`) +
     settingsCard('Account', `<button class="btn-primary danger" id="ab-logout">🚪 Log out</button>`);
 
   window.api.getAppVersion().then((v) => { $('#ab-version').textContent = `Version ${v}`; }).catch(() => {});
@@ -1491,6 +1522,10 @@ function renderAboutSettings(pane) {
   $('#ab-logout').addEventListener('click', () => {
     document.getElementById('settings-modal').remove();
     $('#btn-logout').click();
+  });
+  $('#ab-owner-link').addEventListener('click', (e) => {
+    e.preventDefault();
+    window.api.openDownloadUrl('https://theottdeals.com');
   });
 }
 
@@ -1990,6 +2025,7 @@ function initDownloads() {
 
 // ===================== Playback =====================
 let player;
+let introSkippedFor = null; // nowPlaying.url of the episode whose intro was already skipped/passed
 
 // ===================== Live TV: inline preview + channel list =====================
 // The inline preview and the fullscreen player share the SAME <video>
@@ -2287,6 +2323,9 @@ function openPlayer(meta) {
   $('#p-seek').value = 0;
   $('#p-seek-played').style.width = '0%';
   $('#p-seek-buffered').innerHTML = '';
+  $('#p-next-ep').hidden = true;
+  $('#p-skip-intro').hidden = true;
+  introSkippedFor = null;
 
   // The saved position goes to the player up front, so the stream opens
   // right there instead of starting at 0:00 and jumping once it loads.
@@ -2295,6 +2334,48 @@ function openPlayer(meta) {
   player.play(meta.url, { isLive: meta.isLive, startAt });
 
   if (!meta.isLive) startHistoryTracking(meta);
+}
+
+// Providers don't send intro start/end markers, so this is a fixed estimate
+// (most intros run under 90s) rather than real detection.
+const INTRO_SKIP_SECONDS = 85;
+const NEXT_EP_SHOW_BEFORE_END = 20;
+
+function updateEpisodeNavButtons(cur, dur) {
+  const meta = state.nowPlaying;
+  const isEpisode = meta && meta.type === 'episode';
+  const skipBtn = $('#p-skip-intro');
+  const nextBtn = $('#p-next-ep');
+
+  if (!isEpisode || !isFinite(dur) || dur <= 0) {
+    skipBtn.hidden = true;
+    nextBtn.hidden = true;
+    return;
+  }
+
+  const alreadySkipped = introSkippedFor === meta.url;
+  skipBtn.hidden = alreadySkipped || cur >= INTRO_SKIP_SECONDS || dur <= 150;
+
+  const hasNext = !!getNextEpisode();
+  nextBtn.hidden = !hasNext || (dur - cur) > NEXT_EP_SHOW_BEFORE_END;
+}
+
+function getNextEpisode() {
+  const ctx = state.episodeContext;
+  if (!ctx || !ctx.list || typeof ctx.index !== 'number') return null;
+  const next = ctx.list[ctx.index + 1];
+  if (!next) return null;
+  return { ctx, next };
+}
+
+function playNextEpisode() {
+  const found = getNextEpisode();
+  if (!found) return;
+  const { ctx, next } = found;
+  stopHistoryTracking();
+  $('#p-next-ep').hidden = true;
+  $('#p-skip-intro').hidden = true;
+  playEpisode(next, ctx.series, ctx.seasonNum, { list: ctx.list, index: ctx.index + 1, resumeAt: 0 });
 }
 
 // Saves watch progress periodically (not on every timeupdate tick — that
@@ -2392,17 +2473,20 @@ async function initPlayer() {
     if (state.nowPlaying && state.nowPlaying.isLive) openFullscreenChannelPicker();
   });
 
+  $('#p-next-ep').addEventListener('click', playNextEpisode);
+  $('#p-skip-intro').addEventListener('click', () => {
+    const meta = state.nowPlaying;
+    if (meta) introSkippedFor = meta.url;
+    $('#p-skip-intro').hidden = true;
+    player.seekTo(INTRO_SKIP_SECONDS);
+  });
+
   video.addEventListener('play', () => { $('#p-playpause').textContent = '⏸'; });
   video.addEventListener('pause', () => { $('#p-playpause').textContent = '▶'; });
 
   video.addEventListener('ended', () => {
     if (!settings().autoNextEpisode) return;
-    const ctx = state.episodeContext;
-    if (!ctx || !ctx.list || typeof ctx.index !== 'number') return;
-    const next = ctx.list[ctx.index + 1];
-    if (!next) return;
-    stopHistoryTracking();
-    playEpisode(next, ctx.series, ctx.seasonNum, { list: ctx.list, index: ctx.index + 1, resumeAt: 0 });
+    playNextEpisode();
   });
   // Waiting for the media element's own play/pause event to redraw the
   // button made every press feel late, because that event only arrives once
@@ -2431,6 +2515,8 @@ async function initPlayer() {
     $('#p-time-cur').textContent = fmtTime(cur);
     $('#p-seek').value = Math.min(cur, dur);
     $('#p-seek-played').style.width = `${Math.min(100, (cur / dur) * 100)}%`;
+
+    updateEpisodeNavButtons(cur, dur);
   });
 
   let _bufferPollTimer = null;

@@ -31,10 +31,38 @@ class PlayerController {
     // (see admitSession in main.js). Starts from the clock so ids keep
     // growing across a page reload.
     this._sidBase = Date.now() * 1000;
+    // Only set true by an actual click on the play/pause button (see
+    // togglePlayPause). Everything else that can pause the element —
+    // hls.js/mpegts.js touching it while swapping sources during a
+    // freeze-watchdog reload, a MediaSource buffer append momentarily
+    // starving the element, a transient autoplay-policy rejection of the
+    // play() call after MANIFEST_PARSED/engine start — is not the user
+    // asking to stop. Previously any of those left a live channel sitting
+    // paused forever: the freeze watchdog treats `video.paused` as
+    // intentional and does nothing (see _armFreezeWatchdog above), and
+    // nothing else was watching for it, so the channel required the user to
+    // notice and press play, which sometimes then failed the same way.
+    this._userPaused = false;
 
     this.video.addEventListener('error', () => this._onVideoError());
     this.video.addEventListener('loadeddata', () => this._onReady());
     this.video.addEventListener('playing', () => this._onReady());
+    this.video.addEventListener('pause', () => this._onUnexpectedPause());
+  }
+
+  // Resumes a live channel that went paused without the user asking for it.
+  // Debounced by _resumeRetryTimer so a source that keeps rejecting play()
+  // doesn't turn into a tight pause/play loop — it backs off and lets the
+  // freeze watchdog's own reload logic take over instead.
+  _onUnexpectedPause() {
+    if (!this.isLive || this._userPaused) return;
+    const token = this._playToken;
+    if (this.video.ended) return;
+    clearTimeout(this._resumeRetryTimer);
+    this._resumeRetryTimer = setTimeout(() => {
+      if (token !== this._playToken || this._userPaused || !this.video.paused) return;
+      this.video.play().catch(() => {});
+    }, 300);
   }
 
   setProxyBase(base) { this.proxyBase = base; }
@@ -328,6 +356,8 @@ class PlayerController {
     this._mseStalls = 0;
     this._hlsNetworkErrors = 0;
     this._hlsMediaErrors = 0;
+    this._userPaused = false;
+    clearTimeout(this._resumeRetryTimer);
     const token = this._playToken;
     console.log(`[player] play() url=${url} isLive=${isLive}${this._startAt ? ` startAt=${this._startAt.toFixed(1)}` : ''}`);
     // Watching from the provider takes its one connection: a download that is
@@ -969,6 +999,7 @@ class PlayerController {
   // the click rather than waiting for the element's own event.
   togglePlayPause() {
     const wasPaused = this.video.paused;
+    this._userPaused = !wasPaused;
     if (wasPaused) this.video.play().catch(() => {});
     else this.video.pause();
     return { playing: wasPaused };

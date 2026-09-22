@@ -2,9 +2,12 @@
   "name": "iptv-player",
   "version": "1.2.0",
   "productName": "MY IPTV",
-  "description": "MY IPTV - Xtream Codes IPTV player for Windows",
+  "description": "MY IPTV - Xtream Codes IPTV player for Windows. Developed by Muhammad Hammad Ansar, Full Stack Developer from Pakistan. Property of theottdeals.com — unauthorized use under another name is prohibited.",
   "main": "main.js",
-  "author": "veo444555",
+  "author": {
+    "name": "Muhammad Hammad Ansar",
+    "url": "https://theottdeals.com"
+  },
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
@@ -22,6 +25,7 @@
   "build": {
     "appId": "com.veo.myiptv",
     "productName": "MY IPTV",
+    "copyright": "Copyright © theottdeals.com — Developed by Muhammad Hammad Ansar, Full Stack Developer from Pakistan",
     "directories": { "output": "release" },
     "extraResources": [
       { "from": "vendor/ffmpeg", "to": "ffmpeg", "filter": ["ffmpeg.exe", "ffprobe.exe", "LICENSE.txt"] }
@@ -41,7 +45,8 @@
       "createStartMenuShortcut": true,
       "shortcutName": "MY IPTV",
       "artifactName": "MY-IPTV-Setup-${version}.exe",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh"
     }
   }
 }

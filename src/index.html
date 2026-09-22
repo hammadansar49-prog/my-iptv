@@ -71,11 +71,14 @@
 
     <div id="tab-xtream" class="ltab-panel active">
       <label data-i18n="login.serverUrl">Server URL</label>
-      <input id="x-url" type="text" placeholder="http://server.example.com:8080" />
+      <input id="x-url" type="text" placeholder="http://server.example.com:8080" tabindex="1" />
       <label data-i18n="login.username">Username</label>
-      <input id="x-user" type="text" data-i18n-placeholder="login.username" placeholder="Username" />
+      <input id="x-user" type="text" data-i18n-placeholder="login.username" placeholder="Username" tabindex="2" />
       <label data-i18n="login.password">Password</label>
-      <input id="x-pass" type="password" data-i18n-placeholder="login.password" placeholder="Password" />
+      <div class="pw-field">
+        <input id="x-pass" type="password" data-i18n-placeholder="login.password" placeholder="Password" tabindex="3" />
+        <button type="button" class="pw-toggle" id="x-pass-toggle" tabindex="-1" title="Show/Hide password">👁</button>
+      </div>
     </div>
 
     <div id="tab-m3u" class="ltab-panel">
@@ -86,7 +89,7 @@
     </div>
 
     <div id="login-error" class="login-error"></div>
-    <button id="btn-login" class="btn-primary" data-i18n="login.button">Login</button>
+    <button id="btn-login" class="btn-primary" data-i18n="login.button" tabindex="4">Login</button>
 
     <div class="saved-accounts" id="saved-accounts"></div>
   </div>
@@ -191,6 +194,9 @@
 
     <div class="seek-hint left" id="seek-hint-left"><span class="seek-hint-arrows">‹‹</span><span class="seek-hint-text"></span></div>
     <div class="seek-hint right" id="seek-hint-right"><span class="seek-hint-arrows">››</span><span class="seek-hint-text"></span></div>
+
+    <button class="p-skip-intro" id="p-skip-intro" hidden>Skip Intro</button>
+    <button class="p-next-ep" id="p-next-ep" hidden>Play Next ▶</button>
 
     <div class="player-overlay" id="player-overlay">
       <div class="p-top">
