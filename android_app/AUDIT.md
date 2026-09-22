@@ -300,6 +300,37 @@ same RTDB tree is the right target, with an Android-stable machine id.
 | `iptvLiveCache` + SSE | prime at splash, SSE (or polling) refresh, screens read cache synchronously |
 | `getMachineId()` | install-stable Android device id, frozen once chosen |
 
+## 9. Build environment notes (learned the hard way on this machine)
+
+Two things cost real time here; both have fixes committed.
+
+**`flutter analyze` gets killed (exit 137).** It was killed twice, including with an explicit
+420 s timeout, producing no output. **`dart analyze lib test` works fine** and is what has gated
+every change in this project. The cause is almost certainly the same memory pressure as the next
+item — `flutter analyze` spawns a heavier tool process on top of the analysis server.
+
+**The Gradle daemon JVM crashed at startup.** `flutter build apk --debug` failed with "Gradle
+build daemon disappeared unexpectedly". The JVM crash log (`android/hs_err_pid*.log`) gave the
+real reason:
+
+```
+Native memory allocation (mmap) failed to map 1254096896 bytes. Error detail: G1 virtual space
+Out of Memory Error (os_windows.cpp:3926)
+```
+
+Flutter's `gradle.properties` template ships `-Xmx8G -XX:MaxMetaspaceSize=4G`. This machine cannot
+reserve that, so the daemon died before compiling anything. `android/gradle.properties` now sets
+`-Xmx2G -XX:MaxMetaspaceSize=768m`, `org.gradle.parallel=false` and `org.gradle.workers.max=2`,
+with the crash excerpt in a comment above them. Do not raise those back to the template values on
+this machine.
+
+**First build is very slow.** A cold build downloads the Android NDK (~1 GB), SDK Platforms 34/35,
+CMake, and four libmpv ABI `.jar` archives — well over an hour on a slow connection. Passing
+`--target-platform android-arm64` avoids three of the four libmpv archives and is worth using for
+iteration builds. It is not a fix for anything, just a time saver.
+
+---
+
 Player choice is settled and not to be revisited without real-device evidence (CLAUDE.md):
 **`media_kit` (libmpv)**, not `video_player`/ExoPlayer, because it decodes MKV/HEVC/AC-3 that
 Android's own decoders reject; `hwdec: 'no'` because hardware decode produced a black frame with
