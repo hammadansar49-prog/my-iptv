@@ -20,7 +20,16 @@ class HomeScreen extends ConsumerWidget {
     final continueWatching = ref.watch(continueWatchingProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Home')),
+      appBar: AppBar(
+        title: const Text('Home'),
+        actions: [
+          IconButton(
+            onPressed: () => context.push(Routes.favorites),
+            icon: const Icon(Icons.favorite_border_rounded),
+            tooltip: 'Favorites',
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.only(bottom: Insets.xxl * 3),
         children: [

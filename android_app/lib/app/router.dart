@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../data/models/content.dart';
 import '../presentation/auth/login_screen.dart';
 import '../presentation/auth/splash_screen.dart';
+import '../presentation/favorites/favorites_screen.dart';
 import '../presentation/live_tv/live_tv_screen.dart';
 import '../presentation/movies/movie_detail_screen.dart';
 import '../presentation/movies/movies_screen.dart';
@@ -77,6 +78,10 @@ GoRouter buildRouter(Ref ref) {
           }
           return SeriesDetailScreen(series: series);
         },
+      ),
+      GoRoute(
+        path: Routes.favorites,
+        builder: (context, state) => const FavoritesScreen(),
       ),
       GoRoute(
         path: Routes.settings,
