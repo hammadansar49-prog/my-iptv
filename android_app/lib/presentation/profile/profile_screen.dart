@@ -24,7 +24,16 @@ class ProfileScreen extends ConsumerWidget {
     final dateFmt = DateFormat('EEE, MMM d, y');
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
+      appBar: AppBar(
+        title: const Text('Profile'),
+        actions: [
+          IconButton(
+            onPressed: () => context.push(Routes.settings),
+            icon: const Icon(Icons.settings_rounded),
+            tooltip: 'Settings',
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(
           Insets.lg,

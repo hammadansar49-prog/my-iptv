@@ -11,7 +11,11 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/player/playback_request.dart';
 import '../../services/player/player_controller.dart';
+import '../settings/settings_controller.dart';
+import '../../data/models/content.dart';
+import '../../data/models/library.dart';
 import '../providers.dart';
+import 'autoplay.dart';
 import 'seek_feedback.dart';
 
 /// Fullscreen VOD player (movies and episodes).
@@ -35,6 +39,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     with WidgetsBindingObserver {
   late final PlayerController _player;
   final _seekFeedback = SeekFeedbackController();
+
+  /// The episode queued to follow this one, resolved once playback nears
+  /// the end rather than up front (spec §44: no speculative fetching).
+  PlaybackRequest? _upNext;
+  bool _upNextResolved = false;
+  bool _autoplayDismissed = false;
 
   bool _controlsVisible = true;
   bool _locked = false;
@@ -97,7 +107,87 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   void _onPlayerChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (_player.state.phase == PlaybackPhase.ended) {
+      unawaited(_resolveUpNext());
+    }
+    setState(() {});
+  }
+
+  /// Find the next episode in playback order. Only meaningful for series,
+  /// and only asked for once.
+  Future<void> _resolveUpNext() async {
+    if (_upNextResolved) return;
+    _upNextResolved = true;
+
+    final replay = widget.request.replay;
+    if (replay == null ||
+        replay.section != ContentSection.series ||
+        replay.seriesId == null) {
+      return;
+    }
+    if (!ref.read(settingsProvider).autoPlayNextEpisode) return;
+
+    final repo = ref.read(contentRepositoryProvider);
+    if (repo == null) return;
+
+    // The series detail is already cached from the details screen, so this
+    // normally costs nothing.
+    final seriesList = await repo.seriesList();
+    Series? match;
+    for (final s in seriesList) {
+      if (s.seriesId == replay.seriesId) {
+        match = s;
+        break;
+      }
+    }
+    if (match == null || !mounted) return;
+
+    final detail = await repo.seriesDetail(match);
+    if (detail == null || !mounted) return;
+
+    Episode? current;
+    for (final list in detail.seasons.values) {
+      for (final e in list) {
+        if (e.id == replay.episodeId) current = e;
+      }
+    }
+    if (current == null) return;
+
+    final next = detail.nextAfter(current);
+    if (next == null || !mounted) return;
+
+    setState(() {
+      _upNext = PlaybackRequest(
+        url: repo.episodeUrl(next),
+        title: detail.series.name,
+        subtitle: '${next.tag} · ${next.title}',
+        isLive: false,
+        historyKey: next.key,
+        thumb: next.still ?? detail.series.cover,
+        section: ContentSection.series,
+        replay: PlaybackRef(
+          section: ContentSection.series,
+          streamId: next.id,
+          seriesId: detail.series.seriesId,
+          season: next.season,
+          episodeId: next.id,
+          ext: next.ext,
+        ),
+      );
+    });
+  }
+
+  Future<void> _playUpNext() async {
+    final next = _upNext;
+    if (next == null) return;
+    // Reset the per-item state so the new episode behaves like a fresh open.
+    setState(() {
+      _upNext = null;
+      _upNextResolved = false;
+      _autoplayDismissed = false;
+    });
+    await _player.open(next);
   }
 
   void _recordProgress() {
@@ -249,6 +339,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                   message: state.error?.message ?? 'Unable to play this stream.',
                   onRetry: _player.retry,
                   onBack: () => Navigator.of(context).maybePop(),
+                ),
+
+              if (_upNext != null &&
+                  !_autoplayDismissed &&
+                  state.phase == PlaybackPhase.ended)
+                NextEpisodeCountdown(
+                  title: _upNext!.subtitle.isEmpty
+                      ? _upNext!.title
+                      : _upNext!.subtitle,
+                  onPlay: _playUpNext,
+                  onCancel: () => setState(() => _autoplayDismissed = true),
                 ),
 
               if (_controlsVisible && state.phase != PlaybackPhase.failed)

@@ -10,6 +10,7 @@ import '../presentation/movies/movie_detail_screen.dart';
 import '../presentation/movies/movies_screen.dart';
 import '../presentation/player/player_screen.dart';
 import '../presentation/series/series_detail_screen.dart';
+import '../presentation/settings/settings_screen.dart';
 import '../presentation/series/series_screen.dart';
 import '../presentation/shell/home_shell.dart';
 import '../services/player/playback_request.dart';
@@ -76,6 +77,10 @@ GoRouter buildRouter(Ref ref) {
           }
           return SeriesDetailScreen(series: series);
         },
+      ),
+      GoRoute(
+        path: Routes.settings,
+        builder: (context, state) => const SettingsScreen(),
       ),
       GoRoute(
         path: Routes.player,

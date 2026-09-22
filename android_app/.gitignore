@@ -44,3 +44,4 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 analyze.log
+hs_err_pid*.log
