@@ -1,0 +1,181 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_theme.dart';
+import '../downloads/downloads_screen.dart';
+import '../epg/epg_screen.dart';
+import '../home/home_screen.dart';
+import '../profile/profile_screen.dart';
+import '../providers.dart';
+
+/// The four-tab shell from the design screenshots: Home / EPG / Downloads /
+/// Profile, in a floating rounded bar over a true-black background.
+///
+/// Tabs are kept alive with an IndexedStack so switching back does not
+/// re-run every fetch (spec §44) — but each tab builds lazily the first time
+/// it is opened, so a cold start does not construct all four.
+class HomeShell extends ConsumerStatefulWidget {
+  const HomeShell({super.key});
+
+  @override
+  ConsumerState<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends ConsumerState<HomeShell> {
+  int _index = 0;
+  late final List<bool> _visited = [true, false, false, false];
+
+  static const _tabs = <_TabSpec>[
+    _TabSpec('Home', Icons.home_outlined, Icons.home_rounded),
+    _TabSpec('EPG', Icons.grid_view_outlined, Icons.grid_view_rounded),
+    _TabSpec('Downloads', Icons.download_outlined, Icons.download_rounded),
+    _TabSpec('Profile', Icons.person_outline_rounded, Icons.person_rounded),
+  ];
+
+  void _select(int i) {
+    if (_index == i) return;
+    setState(() {
+      _index = i;
+      _visited[i] = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isTv = ref.watch(isTvProvider);
+
+    return Scaffold(
+      extendBody: true,
+      body: IndexedStack(
+        index: _index,
+        children: [
+          _lazy(0, const HomeScreen()),
+          _lazy(1, const EpgScreen()),
+          _lazy(2, const DownloadsScreen()),
+          _lazy(3, const ProfileScreen()),
+        ],
+      ),
+      bottomNavigationBar: _FloatingNavBar(
+        index: _index,
+        tabs: _tabs,
+        onSelect: _select,
+        tv: isTv,
+      ),
+    );
+  }
+
+  Widget _lazy(int i, Widget child) =>
+      _visited[i] ? child : const SizedBox.shrink();
+}
+
+class _TabSpec {
+  const _TabSpec(this.label, this.icon, this.activeIcon);
+  final String label;
+  final IconData icon;
+  final IconData activeIcon;
+}
+
+class _FloatingNavBar extends StatelessWidget {
+  const _FloatingNavBar({
+    required this.index,
+    required this.tabs,
+    required this.onSelect,
+    required this.tv,
+  });
+
+  final int index;
+  final List<_TabSpec> tabs;
+  final ValueChanged<int> onSelect;
+  final bool tv;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(Insets.lg, 0, Insets.lg, Insets.md),
+        child: Container(
+          height: tv ? 76 : 66,
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(Radii.pill),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: Insets.sm),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              for (var i = 0; i < tabs.length; i++)
+                _NavItem(
+                  spec: tabs[i],
+                  selected: i == index,
+                  onTap: () => onSelect(i),
+                  tv: tv,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.spec,
+    required this.selected,
+    required this.onTap,
+    required this.tv,
+  });
+
+  final _TabSpec spec;
+  final bool selected;
+  final VoidCallback onTap;
+  final bool tv;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? AppColors.accent : AppColors.textPrimary;
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: spec.label,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(Radii.pill),
+          // TV needs a visible focus ring on every interactive item (§36).
+          focusColor: AppColors.accentSoft,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            margin: const EdgeInsets.symmetric(vertical: Insets.sm),
+            decoration: BoxDecoration(
+              color: selected ? AppColors.surfaceHigh : Colors.transparent,
+              borderRadius: BorderRadius.circular(Radii.pill),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  selected ? spec.activeIcon : spec.icon,
+                  color: color,
+                  size: tv ? 26 : 22,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  spec.label,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: tv ? 13 : 11,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
