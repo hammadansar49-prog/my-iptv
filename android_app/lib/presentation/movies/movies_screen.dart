@@ -26,6 +26,20 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
   Timer? _debounce;
   String _query = '';
 
+  // Started once per query: a future created in build() restarts on every
+  // rebuild (keyboard, insets) and the results flash back to a spinner.
+  Future<List<Movie>>? _search;
+  String? _searchFor;
+
+  Future<List<Movie>> _searchResults() {
+    if (_search == null || _searchFor != _query) {
+      _searchFor = _query;
+      _search = ref.read(contentRepositoryProvider)?.searchMovies(_query) ??
+          Future.value(const <Movie>[]);
+    }
+    return _search!;
+  }
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -69,7 +83,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
     if (_query.isNotEmpty) {
       // Movies ONLY — no channels, no series, no episodes.
       return FutureBuilder<List<Movie>>(
-        future: ref.read(contentRepositoryProvider)?.searchMovies(_query),
+        future: _searchResults(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const PosterGridSkeleton();

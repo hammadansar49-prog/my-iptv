@@ -40,6 +40,22 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
   bool _fullscreen = false;
   String _query = '';
   Timer? _debounce;
+
+  /// The search for [_query], started once per query. Creating it inside
+  /// build() restarted it on every rebuild — and the inline player rebuilds
+  /// this screen continuously while a channel plays — so the results list
+  /// sat on its spinner forever.
+  Future<List<LiveChannel>>? _search;
+  String? _searchFor;
+
+  Future<List<LiveChannel>> _searchResults() {
+    if (_search == null || _searchFor != _query) {
+      _searchFor = _query;
+      _search = ref.read(contentRepositoryProvider)?.searchChannels(_query) ??
+          Future.value(const <LiveChannel>[]);
+    }
+    return _search!;
+  }
   final _searchController = TextEditingController();
 
   /// Guards against a burst of channel taps queueing several opens.
@@ -275,7 +291,7 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
     if (_query.isNotEmpty) {
       // Scoped search: live channels ONLY (spec §13).
       return FutureBuilder<List<LiveChannel>>(
-        future: ref.read(contentRepositoryProvider)?.searchChannels(_query),
+        future: _searchResults(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());

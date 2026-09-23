@@ -26,6 +26,20 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
   Timer? _debounce;
   String _query = '';
 
+  // Started once per query: a future created in build() restarts on every
+  // rebuild (keyboard, insets) and the results flash back to a spinner.
+  Future<List<Series>>? _search;
+  String? _searchFor;
+
+  Future<List<Series>> _searchResults() {
+    if (_search == null || _searchFor != _query) {
+      _searchFor = _query;
+      _search = ref.read(contentRepositoryProvider)?.searchSeries(_query) ??
+          Future.value(const <Series>[]);
+    }
+    return _search!;
+  }
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -69,7 +83,7 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
     if (_query.isNotEmpty) {
       // Series ONLY — never movies or live results.
       return FutureBuilder<List<Series>>(
-        future: ref.read(contentRepositoryProvider)?.searchSeries(_query),
+        future: _searchResults(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const PosterGridSkeleton();
