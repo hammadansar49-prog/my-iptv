@@ -12,6 +12,7 @@ import '../../services/player/playback_request.dart';
 import '../providers.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/download_button.dart';
+import '../widgets/favorite_heart_button.dart';
 import '../widgets/network_artwork.dart';
 
 /// Series → seasons → episodes → player (spec §16). Same full-bleed-poster
@@ -313,6 +314,11 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                 ],
               ),
               _BackButton(onTap: () => Navigator.of(context).maybePop()),
+              FavoriteHeartButton(
+                isFavorite: isFavorite,
+                title: widget.series.name,
+                onToggle: toggleFavorite,
+              ),
             ],
           );
         },

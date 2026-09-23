@@ -116,15 +116,6 @@ class PlayerControls extends StatelessWidget {
                     download!,
                     const SizedBox(width: Insets.sm),
                   ],
-                  PlayerPill(
-                    label: 'VLC',
-                    icon: Icons.swap_horiz_rounded,
-                    onTap: () {
-                      onInteract();
-                      onExternalPlayer();
-                    },
-                  ),
-                  const SizedBox(width: Insets.sm),
                   RoundPlayerButton(
                     icon: Icons.aspect_ratio_rounded,
                     onTap: () {

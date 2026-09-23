@@ -12,6 +12,7 @@ import '../../services/player/playback_request.dart';
 import '../home/home_feed.dart';
 import '../providers.dart';
 import '../widgets/download_button.dart';
+import '../widgets/favorite_heart_button.dart';
 import '../widgets/network_artwork.dart';
 
 /// Movie details: full-bleed poster, then a dark panel with the title,
@@ -310,6 +311,11 @@ class MovieDetailScreen extends ConsumerWidget {
                 ),
               ),
             ),
+          ),
+          FavoriteHeartButton(
+            isFavorite: isFavorite,
+            title: shown.name,
+            onToggle: toggleFavorite,
           ),
         ],
       ),
