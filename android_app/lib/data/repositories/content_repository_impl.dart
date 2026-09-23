@@ -2,7 +2,6 @@ import 'dart:async';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/errors/app_error.dart';
-import '../../core/network/connection_guard.dart';
 import '../../core/utils/logger.dart';
 import '../../domain/repositories/repositories.dart';
 import '../api/xtream_api.dart';
@@ -25,14 +24,11 @@ class _Cached<T> {
 /// search; asking the panel again per keystroke would be both slow and a
 /// second provider connection.
 class ContentRepositoryImpl implements ContentRepository {
-  ContentRepositoryImpl({required XtreamApi api, required ConnectionGuard guard})
-      : _api = api,
-        _guard = guard;
+  ContentRepositoryImpl({required XtreamApi api}) : _api = api;
 
   static const _tag = 'ContentRepository';
 
   final XtreamApi _api;
-  final ConnectionGuard _guard;
 
   final Map<ContentSection, _Cached<List<Category>>> _categories = {};
   _Cached<List<LiveChannel>>? _channels;
@@ -55,11 +51,17 @@ class ContentRepositoryImpl implements ContentRepository {
     return future;
   }
 
-  /// All catalogue reads go through the connection guard — on a
-  /// one-connection account a metadata fetch during playback would knock the
-  /// stream over (AUDIT.md §3).
-  Future<T> _fetch<T>(String label, Future<T> Function() body) =>
-      _guard.withConnection(ProviderUse.probe, label: label, (_) => body());
+  /// Catalogue/EPG reads hit `player_api.php`'s plain JSON endpoints, which
+  /// are separate from the stream connection slots the panel counts against
+  /// `max_connections` (AUDIT.md §8 table: only playback + downloads go
+  /// through `ConnectionGuard`). Routing these through the guard as well was
+  /// a bug: on a `max_connections=1` account (the common case) every catalog
+  /// fetch queued behind whatever was playing and behind each other with a
+  /// 700ms handover gap between each, so Movies/Series/Live TV could spin
+  /// loading for a very long time — or never finish while something was
+  /// playing — even though the request itself would have succeeded
+  /// instantly. Metadata reads run straight through, unthrottled.
+  Future<T> _fetch<T>(String label, Future<T> Function() body) => body();
 
   @override
   Future<List<Category>> categories(ContentSection section) async {

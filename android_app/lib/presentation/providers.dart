@@ -116,10 +116,7 @@ final contentRepositoryProvider = Provider<ContentRepository?>((ref) {
   final auth = ref.watch(authRepositoryProvider);
   final api = auth.api;
   if (api == null) return null;
-  return ContentRepositoryImpl(
-    api: api,
-    guard: ref.watch(connectionGuardProvider),
-  );
+  return ContentRepositoryImpl(api: api);
 });
 
 /// Convenience: throws a clear error if read before login rather than
