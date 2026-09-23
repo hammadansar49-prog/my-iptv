@@ -12,8 +12,8 @@ import '../../services/player/playback_request.dart';
 import '../providers.dart';
 import '../widgets/network_artwork.dart';
 
-/// Movie details: artwork, metadata, and the Play / Resume / Favorite /
-/// Download actions (spec §14).
+/// Movie details: full-bleed poster, then a dark panel with the title,
+/// genres, a Play button, the synopsis and the action row (spec §14).
 class MovieDetailScreen extends ConsumerWidget {
   const MovieDetailScreen({super.key, required this.movie});
 
@@ -25,21 +25,29 @@ class MovieDetailScreen extends ConsumerWidget {
     final detailAsync = ref.watch(movieDetailProvider(movie));
     final detail = detailAsync.valueOrNull;
     final shown = detail?.movie ?? movie;
+    final size = MediaQuery.sizeOf(context);
 
-    final history =
-        ref.watch(libraryRevisionProvider).whenOrNull(data: (_) => true) != null
-            ? ref.read(libraryRepositoryProvider).historyFor(movie.key)
-            : ref.read(libraryRepositoryProvider).historyFor(movie.key);
+    // "More movies" strip under the details — the same catalogue already
+    // loaded for Home/Movies, just with this title itself left out.
+    final more = (ref.watch(moviesProvider('')).valueOrNull ?? const <Movie>[])
+        .where((m) => m.key != movie.key)
+        .toList();
+
+    ref.watch(libraryRevisionProvider);
+    final library = ref.read(libraryRepositoryProvider);
+    final isFavorite = library.isFavorite(movie.key);
+    final history = library.historyFor(movie.key);
     final canResume = history?.isContinueWatching ?? false;
 
-    final isFavorite = ref
-        .watch(favoritesProvider(ContentSection.movies))
-        .any((f) => f.key == movie.key);
+    // Genres as " / " separated line, from whatever the panel actually
+    // returned. No invented tags.
+    final genres = (detail?.genre ?? '')
+        .split(RegExp(r'[,/]'))
+        .map((g) => g.trim())
+        .where((g) => g.isNotEmpty)
+        .join(' / ');
 
-    final downloads = ref.watch(downloadListProvider);
-    final existing = downloads.where((d) => d.title == shown.name).toList();
-
-    PlaybackRequest request({Duration startAt = Duration.zero}) {
+    PlaybackRequest request() {
       final repo = ref.read(contentRepositoryProvider)!;
       return PlaybackRequest(
         url: repo.movieUrl(shown),
@@ -47,7 +55,7 @@ class MovieDetailScreen extends ConsumerWidget {
         isLive: false,
         historyKey: movie.key,
         thumb: shown.poster,
-        startAt: startAt,
+        startAt: canResume ? history!.resumeAt : Duration.zero,
         section: ContentSection.movies,
         replay: PlaybackRef(
           section: ContentSection.movies,
@@ -57,205 +65,323 @@ class MovieDetailScreen extends ConsumerWidget {
       );
     }
 
+    void toggleFavorite() => library.toggleFavorite(FavoriteEntry(
+          key: movie.key,
+          section: ContentSection.movies,
+          title: shown.name,
+          refId: '${shown.streamId}',
+          thumb: shown.poster,
+          addedAt: DateTime.now(),
+        ));
+
     return Scaffold(
-      appBar: AppBar(title: Text(shown.name, maxLines: 1)),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(
-            Insets.lg, 0, Insets.lg, Insets.xxl * 2),
+      backgroundColor: AppColors.background,
+      body: Stack(
         children: [
-          Row(
+          CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: size.height * 0.62,
+                  width: double.infinity,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      NetworkArtwork(
+                        url: shown.poster,
+                        width: size.width,
+                        height: size.height * 0.62,
+                        borderRadius: BorderRadius.zero,
+                        fallbackLabel: shown.name,
+                      ),
+                      // Fade into the panel below.
+                      const DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.center,
+                            end: Alignment.bottomCenter,
+                            colors: [Colors.transparent, AppColors.background],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      Insets.lg, 0, Insets.lg, Insets.xxl),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(shown.name, style: text.headlineMedium),
+
+                      // Year / rating, only when the panel gave them.
+                      if (shown.year != null || shown.rating != null) ...[
+                        const SizedBox(height: Insets.sm),
+                        Row(
+                          children: [
+                            if (shown.year != null)
+                              Text(shown.year!, style: text.bodyMedium),
+                            if (shown.year != null && shown.rating != null)
+                              const Text('  ·  ',
+                                  style:
+                                      TextStyle(color: AppColors.textTertiary)),
+                            if (shown.rating != null) ...[
+                              const Icon(Icons.star_rounded,
+                                  size: 15, color: AppColors.tileYellow),
+                              const SizedBox(width: 3),
+                              Text(shown.rating!.toStringAsFixed(1),
+                                  style: text.bodyMedium),
+                            ],
+                          ],
+                        ),
+                      ],
+
+                      if (genres.isNotEmpty) ...[
+                        const SizedBox(height: Insets.sm),
+                        Text(
+                          genres,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.bodyMedium,
+                        ),
+                      ],
+
+                      const SizedBox(height: Insets.lg),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                          ),
+                          onPressed: () =>
+                              context.push(Routes.player, extra: request()),
+                          icon: const Icon(Icons.play_arrow_rounded),
+                          label: Text(canResume ? 'Resume' : 'Play'),
+                        ),
+                      ),
+
+                      if (canResume) ...[
+                        const SizedBox(height: Insets.md),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: LinearProgressIndicator(
+                            value: history!.progress,
+                            minHeight: 3,
+                            backgroundColor: AppColors.divider,
+                            valueColor:
+                                const AlwaysStoppedAnimation(AppColors.accent),
+                          ),
+                        ),
+                      ],
+
+                      if (detail?.plot != null) ...[
+                        const SizedBox(height: Insets.lg),
+                        Text(detail!.plot!, style: text.bodyLarge),
+                      ],
+
+                      if (detail?.cast != null) ...[
+                        const SizedBox(height: Insets.md),
+                        Text('Cast', style: text.titleMedium),
+                        const SizedBox(height: Insets.xs),
+                        Text(detail!.cast!, style: text.bodyMedium),
+                      ],
+
+                      const SizedBox(height: Insets.xl),
+                      Row(
+                        children: [
+                          // One favourite control, not two. The reference
+                          // shows both a "+" and a heart; they would do the
+                          // same thing here, so they are consolidated.
+                          _Action(
+                            icon: isFavorite
+                                ? Icons.check_rounded
+                                : Icons.add_rounded,
+                            label: 'My List',
+                            active: isFavorite,
+                            onTap: toggleFavorite,
+                          ),
+                          const SizedBox(width: Insets.xl),
+                          _Action(
+                            icon: Icons.download_rounded,
+                            label: 'Download',
+                            onTap: () {
+                              final repo =
+                                  ref.read(contentRepositoryProvider);
+                              if (repo == null) return;
+                              ref
+                                  .read(downloadManagerProvider)
+                                  .add(DownloadRequest(
+                                    url: repo.movieUrl(shown),
+                                    title: shown.name,
+                                    ext: shown.ext,
+                                    thumb: shown.poster,
+                                  ));
+                              ScaffoldMessenger.of(context)
+                                ..hideCurrentSnackBar()
+                                ..showSnackBar(const SnackBar(
+                                    content: Text('Added to downloads')));
+                            },
+                          ),
+                          // Trailer: `get_vod_info` exposes `youtube_trailer`
+                          // on some panels only, so the button appears only
+                          // when there is actually a trailer to play.
+                          if (detail?.trailer != null &&
+                              detail!.trailer!.isNotEmpty) ...[
+                            const SizedBox(width: Insets.xl),
+                            _Action(
+                              icon: Icons.smart_display_outlined,
+                              label: 'Trailer',
+                              onTap: () => ScaffoldMessenger.of(context)
+                                ..hideCurrentSnackBar()
+                                ..showSnackBar(SnackBar(
+                                  content: Text(
+                                      'Trailer: ${detail.trailer}'),
+                                )),
+                            ),
+                          ],
+                        ],
+                      ),
+
+                      if (detailAsync.isLoading) ...[
+                        const SizedBox(height: Insets.xl),
+                        const Center(child: CircularProgressIndicator()),
+                      ],
+
+                      if (more.isNotEmpty) ...[
+                        const SizedBox(height: Insets.xl),
+                        Text('More Movies', style: text.titleMedium),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              if (more.isNotEmpty)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                      Insets.lg, Insets.md, Insets.lg, Insets.xxl * 3),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 160,
+                      childAspectRatio: 0.58,
+                      crossAxisSpacing: Insets.md,
+                      mainAxisSpacing: Insets.lg,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, i) => _MoreMovieCard(movie: more[i]),
+                      childCount: more.length,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+
+          // Floating back button over the poster.
+          Positioned(
+            left: Insets.lg,
+            top: MediaQuery.paddingOf(context).top + Insets.sm,
+            child: Material(
+              color: Colors.black.withValues(alpha: 0.45),
+              shape: const CircleBorder(),
+              child: InkWell(
+                onTap: () => context.canPop()
+                    ? context.pop()
+                    : context.go(Routes.home),
+                customBorder: const CircleBorder(),
+                focusColor: Colors.white24,
+                child: const SizedBox(
+                  width: 42,
+                  height: 42,
+                  child: Icon(Icons.arrow_back_rounded, color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One poster in the "More Movies" grid at the bottom — tapping replaces
+/// this detail screen with the new one rather than pushing on top, so the
+/// back stack does not grow one entry per movie browsed this way.
+class _MoreMovieCard extends StatelessWidget {
+  const _MoreMovieCard({required this.movie});
+
+  final Movie movie;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        return InkWell(
+          borderRadius: BorderRadius.circular(Radii.md),
+          focusColor: AppColors.accentSoft,
+          onTap: () =>
+              context.pushReplacement(Routes.movieDetail, extra: movie),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               NetworkArtwork(
-                url: shown.poster,
-                width: 120,
-                height: 174,
+                url: movie.poster,
+                width: width,
+                height: width * 1.45,
               ),
-              const SizedBox(width: Insets.lg),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(shown.name, style: text.titleLarge),
-                    const SizedBox(height: Insets.sm),
-                    Wrap(
-                      spacing: Insets.sm,
-                      runSpacing: Insets.xs,
-                      children: [
-                        if (shown.year != null) _Chip(label: shown.year!),
-                        if (shown.rating != null)
-                          _Chip(
-                            label: shown.rating!.toStringAsFixed(1),
-                            icon: Icons.star_rounded,
-                          ),
-                        if (detail?.genre != null) _Chip(label: detail!.genre!),
-                      ],
-                    ),
-                    if (detail?.durationSeconds != null) ...[
-                      const SizedBox(height: Insets.sm),
-                      Text(
-                        _duration(detail!.durationSeconds!),
-                        style: text.bodySmall,
-                      ),
-                    ],
-                  ],
-                ),
+              const SizedBox(height: Insets.sm),
+              Text(
+                movie.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: text.bodyMedium?.copyWith(color: AppColors.textPrimary),
               ),
+              if (movie.year != null)
+                Text(movie.year!, style: text.bodySmall),
             ],
           ),
-
-          const SizedBox(height: Insets.xl),
-
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: () => context.push(
-                    Routes.player,
-                    extra: request(
-                      startAt: canResume ? history!.resumeAt : Duration.zero,
-                    ),
-                  ),
-                  icon: const Icon(Icons.play_arrow_rounded),
-                  label: Text(canResume ? 'Resume' : 'Play'),
-                ),
-              ),
-              const SizedBox(width: Insets.md),
-              _IconAction(
-                icon: isFavorite
-                    ? Icons.favorite_rounded
-                    : Icons.favorite_border_rounded,
-                color: isFavorite ? AppColors.accent : AppColors.textPrimary,
-                onTap: () =>
-                    ref.read(libraryRepositoryProvider).toggleFavorite(
-                          FavoriteEntry(
-                            key: movie.key,
-                            section: ContentSection.movies,
-                            title: shown.name,
-                            refId: '${shown.streamId}',
-                            thumb: shown.poster,
-                            addedAt: DateTime.now(),
-                          ),
-                        ),
-              ),
-              const SizedBox(width: Insets.sm),
-              _IconAction(
-                icon: existing.isEmpty
-                    ? Icons.download_rounded
-                    : Icons.download_done_rounded,
-                color: existing.isEmpty
-                    ? AppColors.textPrimary
-                    : AppColors.success,
-                onTap: () {
-                  final repo = ref.read(contentRepositoryProvider);
-                  if (repo == null) return;
-                  ref.read(downloadManagerProvider).add(DownloadRequest(
-                        url: repo.movieUrl(shown),
-                        title: shown.name,
-                        ext: shown.ext,
-                        thumb: shown.poster,
-                      ));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Added to downloads')),
-                  );
-                },
-              ),
-            ],
-          ),
-
-          if (canResume) ...[
-            const SizedBox(height: Insets.md),
-            LinearProgressIndicator(
-              value: history!.progress,
-              minHeight: 3,
-              backgroundColor: AppColors.divider,
-              valueColor: const AlwaysStoppedAnimation(AppColors.accent),
-            ),
-          ],
-
-          if (detail?.plot != null) ...[
-            const SizedBox(height: Insets.xl),
-            Text('Overview', style: text.titleMedium),
-            const SizedBox(height: Insets.sm),
-            Text(detail!.plot!, style: text.bodyLarge),
-          ],
-
-          if (detail?.cast != null) ...[
-            const SizedBox(height: Insets.lg),
-            Text('Cast', style: text.titleMedium),
-            const SizedBox(height: Insets.xs),
-            Text(detail!.cast!, style: text.bodyMedium),
-          ],
-
-          if (detailAsync.isLoading) ...[
-            const SizedBox(height: Insets.xl),
-            const Center(child: CircularProgressIndicator()),
-          ],
-        ],
-      ),
-    );
-  }
-
-  static String _duration(int seconds) {
-    final h = seconds ~/ 3600;
-    final m = (seconds % 3600) ~/ 60;
-    return h > 0 ? '${h}h ${m}m' : '${m}m';
-  }
-}
-
-class _Chip extends StatelessWidget {
-  const _Chip({required this.label, this.icon});
-
-  final String label;
-  final IconData? icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: Insets.md, vertical: Insets.xs),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(Radii.pill),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 13, color: AppColors.tileYellow),
-            const SizedBox(width: 4),
-          ],
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
-class _IconAction extends StatelessWidget {
-  const _IconAction({
+class _Action extends StatelessWidget {
+  const _Action({
     required this.icon,
+    required this.label,
     required this.onTap,
-    required this.color,
+    this.active = false,
   });
 
   final IconData icon;
+  final String label;
   final VoidCallback onTap;
-  final Color color;
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
+    final color = active ? AppColors.accent : AppColors.textPrimary;
+    return InkWell(
+      onTap: onTap,
       borderRadius: BorderRadius.circular(Radii.md),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(Radii.md),
-        focusColor: AppColors.accentSoft,
-        child: SizedBox(
-          width: 50,
-          height: 50,
-          child: Icon(icon, color: color),
+      focusColor: AppColors.accentSoft,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: Insets.sm, vertical: Insets.xs),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 26),
+            const SizedBox(height: Insets.xs),
+            Text(label,
+                style: TextStyle(color: color, fontSize: 12)),
+          ],
         ),
       ),
     );

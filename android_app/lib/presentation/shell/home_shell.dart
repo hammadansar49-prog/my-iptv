@@ -136,6 +136,7 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = selected ? AppColors.accent : AppColors.textPrimary;
+    final iconSize = tv ? 26.0 : 22.0;
     return Expanded(
       child: Semantics(
         button: true,
@@ -146,21 +147,24 @@ class _NavItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(Radii.pill),
           // TV needs a visible focus ring on every interactive item (§36).
           focusColor: AppColors.accentSoft,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            margin: const EdgeInsets.symmetric(vertical: Insets.sm),
-            decoration: BoxDecoration(
-              color: selected ? AppColors.surfaceHigh : Colors.transparent,
-              borderRadius: BorderRadius.circular(Radii.pill),
-            ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: Insets.sm),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  selected ? spec.activeIcon : spec.icon,
-                  color: color,
-                  size: tv ? 26 : 22,
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  padding: EdgeInsets.all(selected ? Insets.sm : 0),
+                  decoration: BoxDecoration(
+                    color: selected ? AppColors.accent : Colors.transparent,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    selected ? spec.activeIcon : spec.icon,
+                    color: selected ? Colors.white : color,
+                    size: iconSize,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(

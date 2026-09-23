@@ -38,6 +38,7 @@ class LiveChannel {
     this.epgChannelId,
     this.number,
     this.tvArchive = false,
+    this.tvArchiveDuration = 0,
   });
 
   final int streamId;
@@ -51,8 +52,14 @@ class LiveChannel {
   final int? number;
 
   /// Panel supports catch-up for this channel (the "Catch-up" pill in the
-  /// design screenshots).
+  /// design screenshots). Standard Xtream fields.
   final bool tvArchive;
+
+  /// How many days of catch-up the panel keeps. 0 means none.
+  final int tvArchiveDuration;
+
+  /// Only offer catch-up when the panel actually says it has some.
+  bool get hasCatchup => tvArchive && tvArchiveDuration > 0;
 
   factory LiveChannel.fromJson(Map<String, dynamic> j) => LiveChannel(
         streamId: asInt(j['stream_id']),
@@ -62,6 +69,7 @@ class LiveChannel {
         epgChannelId: asStringOrNull(j['epg_channel_id']),
         number: asIntOrNull(j['num']),
         tvArchive: asBool(j['tv_archive']),
+        tvArchiveDuration: asInt(j['tv_archive_duration']),
       );
 
   /// Stable identity for favorites/history. Mirrors the PC app's

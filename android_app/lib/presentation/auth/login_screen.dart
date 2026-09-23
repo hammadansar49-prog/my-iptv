@@ -57,13 +57,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           password: _password.text,
         );
     if (!mounted) return;
-    if (ok) context.go(Routes.home);
-  }
-
-  Future<void> _useSaved(Account account) async {
-    final ok = await ref.read(authControllerProvider.notifier).signInWith(account);
-    if (!mounted) return;
-    if (ok) context.go(Routes.home);
+    // The credentials are verified at this point. Land on Accounts rather
+    // than Home so the new playlist is shown in the switcher alongside any
+    // others, which is where the user picks what to actually open.
+    if (ok) context.go(Routes.accounts);
   }
 
   @override
@@ -83,10 +80,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               Insets.xxl,
             ),
             children: [
-              Text('Accounts', style: text.displaySmall),
+              Text('Xtream List', style: text.displaySmall),
               const SizedBox(height: Insets.xs),
               Text(
-                'Sign in with the Xtream details from your provider.',
+                'Add your playlist (via XC API).',
                 style: text.bodyMedium,
               ),
               const SizedBox(height: Insets.xl),
@@ -98,23 +95,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ref.read(authControllerProvider.notifier).clearError,
                 ),
                 const SizedBox(height: Insets.lg),
-              ],
-
-              if (state.savedAccounts.isNotEmpty) ...[
-                Text('Saved playlists', style: text.titleMedium),
-                const SizedBox(height: Insets.md),
-                ...state.savedAccounts.map(
-                  (a) => _SavedAccountCard(
-                    account: a,
-                    onUse: state.isBusy ? null : () => _useSaved(a),
-                    onRemove: state.isBusy
-                        ? null
-                        : () => ref
-                            .read(authControllerProvider.notifier)
-                            .removeAccount(a.id),
-                  ),
-                ),
-                const SizedBox(height: Insets.xl),
               ],
 
               Text('Add an Xtream playlist', style: text.titleMedium),
@@ -201,81 +181,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     : const Text('Connect'),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SavedAccountCard extends StatelessWidget {
-  const _SavedAccountCard({
-    required this.account,
-    required this.onUse,
-    required this.onRemove,
-  });
-
-  final Account account;
-  final VoidCallback? onUse;
-  final VoidCallback? onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final initial =
-        (account.name.isEmpty ? '?' : account.name[0]).toUpperCase();
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Insets.md),
-      child: Material(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(Radii.lg),
-        child: InkWell(
-          onTap: onUse,
-          borderRadius: BorderRadius.circular(Radii.lg),
-          child: Padding(
-            padding: const EdgeInsets.all(Insets.lg),
-            child: Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceHigh,
-                    borderRadius: BorderRadius.circular(Radii.md),
-                  ),
-                  child: Text(initial, style: text.headlineSmall),
-                ),
-                const SizedBox(width: Insets.lg),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        account.name,
-                        style: text.titleMedium,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        account.username,
-                        style: text.bodySmall,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  onPressed: onRemove,
-                  icon: const Icon(Icons.close_rounded),
-                  color: AppColors.textTertiary,
-                  tooltip: 'Remove',
-                ),
-              ],
-            ),
           ),
         ),
       ),

@@ -9,12 +9,14 @@ import '../data/api/rtdb_api.dart';
 import '../data/models/account.dart';
 import '../data/models/content.dart';
 import '../data/models/library.dart';
+import '../data/repositories/account_summary_store.dart';
 import '../data/repositories/auth_repository_impl.dart';
 import '../data/repositories/content_repository_impl.dart';
 import '../data/repositories/library_repository_impl.dart';
 import '../data/repositories/license_repository_impl.dart';
 import '../domain/repositories/repositories.dart';
 import '../services/download/download_manager.dart';
+import 'security/app_lock_controller.dart';
 
 /// Composition root. Everything the app needs is wired here once; nothing
 /// constructs its own dependencies (spec §5/§6).
@@ -29,6 +31,11 @@ final localStoreProvider = Provider<LocalStore>(
 final secureStoreProvider = Provider<SecureStore>((ref) => SecureStore());
 
 final deviceIdentityProvider = Provider<DeviceIdentity>((ref) => DeviceIdentity());
+
+final appLockProvider =
+    StateNotifierProvider<AppLockController, String?>((ref) {
+  return AppLockController(ref.watch(secureStoreProvider));
+});
 
 /// True on Android TV. Drives every adaptive-layout decision (spec §36).
 final isTvProvider = Provider<bool>((ref) => false);
@@ -73,6 +80,19 @@ final libraryRepositoryProvider = Provider<LibraryRepositoryImpl>((ref) {
   final repo = LibraryRepositoryImpl(store: ref.watch(localStoreProvider));
   ref.onDispose(repo.dispose);
   return repo;
+});
+
+final accountSummaryStoreProvider = Provider<AccountSummaryStore>((ref) {
+  final store = AccountSummaryStore(store: ref.watch(localStoreProvider));
+  ref.onDispose(store.dispose);
+  return store;
+});
+
+/// Bumped whenever a summary is recorded, so account cards refresh.
+final accountSummaryRevisionProvider = StreamProvider<int>((ref) {
+  final store = ref.watch(accountSummaryStoreProvider);
+  var n = 0;
+  return store.changes.map((_) => ++n);
 });
 
 final downloadManagerProvider = Provider<DownloadManager>((ref) {

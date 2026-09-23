@@ -68,6 +68,14 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
     if (!mounted || _navigated) return;
     _navigated = true;
+
+    // App-lock (Profile → Security) gates every target, not just Home — a
+    // PIN protects the device even if the session already expired to the
+    // login screen.
+    if (ref.read(appLockProvider) != null) {
+      context.go(Routes.lock, extra: target);
+      return;
+    }
     context.go(target);
   }
 
@@ -78,6 +86,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     // Cached license first: it is a local read and decides nothing on its
     // own here, but having it loaded means the profile screen is instant.
     await ref.read(licenseRepositoryProvider).load();
+
+    await ref.read(appLockProvider.notifier).load();
 
     return ref.read(authControllerProvider.notifier).restore();
   }

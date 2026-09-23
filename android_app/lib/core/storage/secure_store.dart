@@ -19,6 +19,7 @@ class SecureStore {
   static const _kAccounts = 'accounts.v1';
   static const _kActiveAccountId = 'active_account_id.v1';
   static const _kLicense = 'license.v1';
+  static const _kAppLockPin = 'app_lock_pin.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -58,10 +59,20 @@ class SecureStore {
       ? _delete(_kLicense)
       : _write(_kLicense, jsonEncode(license));
 
+  /// The app-lock PIN (Profile → Security). Null means locking is off — its
+  /// absence IS the "disabled" state, not a separate flag to keep in sync.
+  Future<String?> readAppLockPin() => _read(_kAppLockPin);
+
+  Future<void> writeAppLockPin(String pin) => _write(_kAppLockPin, pin);
+
+  Future<void> clearAppLockPin() => _delete(_kAppLockPin);
+
   Future<void> clear() async {
     await _delete(_kAccounts);
     await _delete(_kActiveAccountId);
     await _delete(_kLicense);
+    // App lock deliberately survives sign-out/account switches — it protects
+    // the device, not one playlist.
   }
 
   // Secure storage can throw on some devices (corrupt keystore after a

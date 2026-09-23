@@ -3,13 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/models/content.dart';
+import '../presentation/auth/accounts_screen.dart';
 import '../presentation/auth/login_screen.dart';
+import '../presentation/auth/setup_screen.dart';
 import '../presentation/auth/splash_screen.dart';
 import '../presentation/favorites/favorites_screen.dart';
 import '../presentation/live_tv/live_tv_screen.dart';
 import '../presentation/movies/movie_detail_screen.dart';
 import '../presentation/movies/movies_screen.dart';
 import '../presentation/player/player_screen.dart';
+import '../presentation/security/lock_screen.dart';
+import '../presentation/security/security_screen.dart';
 import '../presentation/series/series_detail_screen.dart';
 import '../presentation/settings/settings_screen.dart';
 import '../presentation/series/series_screen.dart';
@@ -30,9 +34,19 @@ GoRouter buildRouter(Ref ref) {
         path: Routes.splash,
         builder: (context, state) => const SplashScreen(),
       ),
+      // Pre-login entry: the source picker.
       GoRoute(
         path: Routes.login,
+        builder: (context, state) => const SetupScreen(),
+      ),
+      // The real Xtream credential form.
+      GoRoute(
+        path: Routes.xtreamLogin,
         builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: Routes.accounts,
+        builder: (context, state) => const AccountsScreen(),
       ),
       GoRoute(
         path: Routes.home,
@@ -86,6 +100,16 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: Routes.settings,
         builder: (context, state) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: Routes.security,
+        builder: (context, state) => const SecurityScreen(),
+      ),
+      GoRoute(
+        path: Routes.lock,
+        builder: (context, state) => LockScreen(
+          target: state.extra is String ? state.extra as String : Routes.home,
+        ),
       ),
       GoRoute(
         path: Routes.player,

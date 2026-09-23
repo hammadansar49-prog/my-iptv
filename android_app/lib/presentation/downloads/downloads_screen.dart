@@ -9,8 +9,8 @@ import '../../data/models/content.dart';
 import '../../data/models/library.dart';
 import '../../services/player/playback_request.dart';
 import '../providers.dart';
-import '../widgets/error_banner.dart';
 import '../widgets/network_artwork.dart';
+import 'empty_downloads_art.dart';
 
 /// Downloads grouped into Downloading / Paused / Completed / Failed
 /// (spec §27), each row showing progress, size, speed and its controls.
@@ -23,13 +23,26 @@ class DownloadsScreen extends ConsumerWidget {
 
     if (items.isEmpty) {
       return Scaffold(
+        backgroundColor: AppColors.background,
         appBar: AppBar(title: const Text('Downloads')),
-        body: const Padding(
-          padding: EdgeInsets.only(bottom: Insets.xxl),
-          child: EmptyState(
-            icon: Icons.download_outlined,
-            title: 'No Downloads',
-            message: 'No content found! Download now and come back to watch.',
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: Insets.xxl * 2),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const EmptyDownloadsArt(),
+                const SizedBox(height: Insets.xl),
+                Text(
+                  'No content found! Download now\nand come back to watch',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyLarge
+                      ?.copyWith(color: AppColors.textSecondary, height: 1.5),
+                ),
+              ],
+            ),
           ),
         ),
       );

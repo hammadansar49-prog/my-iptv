@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:screen_brightness/screen_brightness.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../core/constants/app_constants.dart';
@@ -16,6 +18,7 @@ import '../../data/models/content.dart';
 import '../../data/models/library.dart';
 import '../providers.dart';
 import 'autoplay.dart';
+import 'player_controls.dart';
 import 'seek_feedback.dart';
 
 /// Fullscreen VOD player (movies and episodes).
@@ -48,6 +51,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   bool _controlsVisible = true;
   bool _locked = false;
+  double? _brightness;
+  BoxFit _fit = BoxFit.contain;
+  PlaybackRequest? _previous;
   Timer? _hideTimer;
   Timer? _historyTicker;
 
@@ -67,6 +73,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       DeviceOrientation.landscapeRight,
     ]);
     unawaited(WakelockPlus.enable());
+    unawaited(_readBrightness());
 
     unawaited(_start());
     _scheduleHide();
@@ -76,6 +83,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _historyTicker = Timer.periodic(Playback.historyThrottle, (_) {
       _recordProgress();
     });
+  }
+
+  /// Screen brightness. Handled defensively: some devices/ROMs refuse the
+  /// call, and a slider that cannot move is better than a crash.
+  Future<void> _readBrightness() async {
+    try {
+      final value = await ScreenBrightness().application;
+      if (mounted) setState(() => _brightness = value);
+    } catch (_) {
+      if (mounted) setState(() => _brightness = null);
+    }
+  }
+
+  Future<void> _setBrightness(double value) async {
+    setState(() => _brightness = value);
+    try {
+      await ScreenBrightness().setApplicationScreenBrightness(value);
+    } catch (_) {
+      // Ignored: the slider still tracks the gesture, the OS just declined.
+    }
   }
 
   Future<void> _start() async {
@@ -104,6 +131,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       section: widget.request.section,
       localFile: local,
     ));
+    unawaited(_resolveNeighbours());
   }
 
   void _onPlayerChanged() {
@@ -201,6 +229,180 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         ));
   }
 
+
+  /// Hand the stream to whatever external player the device has (VLC, MX
+  /// Player, ...) via a normal VIEW intent. Real behaviour, not a decorative
+  /// button — but it genuinely can fail if nothing is installed, and then it
+  /// says so instead of silently doing nothing.
+  Future<void> _openExternally() async {
+    final source = _player.state.request?.resolvedSource;
+    if (source == null) return;
+    await _player.pause();
+    try {
+      final uri = Uri.parse(source);
+      final launched =
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(
+            content: Text('No external player is installed to handle this.'),
+          ));
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+          content: Text('Could not open an external player.'),
+        ));
+    }
+  }
+
+  Future<void> _playRequest(PlaybackRequest request) async {
+    setState(() {
+      _upNext = null;
+      _previous = null;
+      _upNextResolved = false;
+      _autoplayDismissed = false;
+    });
+    await _player.open(request);
+    unawaited(_resolveNeighbours());
+  }
+
+  Future<void> _showSpeedSheet() async {
+    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surfaceHigh,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(Insets.lg),
+              child: Text('Playback speed',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+            for (final speed in speeds)
+              ListTile(
+                title: Text('${speed}x'),
+                onTap: () {
+                  _player.setSpeed(speed);
+                  Navigator.of(context).pop();
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showTracksSheet() async {
+    final audio = _player.audioTracks;
+    final subtitles = _player.subtitleTracks;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surfaceHigh,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(Insets.lg),
+              child: Text('Audio',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+            if (audio.isEmpty)
+              const ListTile(title: Text('No audio tracks reported'))
+            else
+              for (final track in audio)
+                ListTile(
+                  title: Text(track.title ?? track.language ?? track.id),
+                  onTap: () {
+                    _player.setAudioTrack(track);
+                    Navigator.of(context).pop();
+                  },
+                ),
+            const Divider(),
+            const Padding(
+              padding: EdgeInsets.all(Insets.lg),
+              child: Text('Subtitles',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+            if (subtitles.isEmpty)
+              const ListTile(title: Text('No subtitle tracks reported'))
+            else
+              for (final track in subtitles)
+                ListTile(
+                  title: Text(track.title ?? track.language ?? track.id),
+                  onTap: () {
+                    _player.setSubtitleTrack(track);
+                    Navigator.of(context).pop();
+                  },
+                ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Resolve the previous/next episode so the skip buttons are live during
+  /// playback, not only once an episode ends.
+  Future<void> _resolveNeighbours() async {
+    final replay = widget.request.replay;
+    if (replay == null ||
+        replay.section != ContentSection.series ||
+        replay.seriesId == null) {
+      return;
+    }
+    final repo = ref.read(contentRepositoryProvider);
+    if (repo == null) return;
+
+    final all = await repo.seriesList();
+    Series? match;
+    for (final s in all) {
+      if (s.seriesId == replay.seriesId) match = s;
+    }
+    if (match == null || !mounted) return;
+    final detail = await repo.seriesDetail(match);
+    if (detail == null || !mounted) return;
+
+    final ordered = <Episode>[];
+    for (final n in detail.seasonNumbers) {
+      ordered.addAll(detail.seasons[n] ?? const []);
+    }
+    final index = ordered.indexWhere((e) => e.id == replay.episodeId);
+    if (index < 0) return;
+
+    PlaybackRequest build(Episode e) => PlaybackRequest(
+          url: repo.episodeUrl(e),
+          title: detail.series.name,
+          subtitle: '${e.tag} - ${e.title}',
+          isLive: false,
+          historyKey: e.key,
+          thumb: e.still ?? detail.series.cover,
+          section: ContentSection.series,
+          replay: PlaybackRef(
+            section: ContentSection.series,
+            streamId: e.id,
+            seriesId: detail.series.seriesId,
+            season: e.season,
+            episodeId: e.id,
+            ext: e.ext,
+          ),
+        );
+
+    if (!mounted) return;
+    setState(() {
+      _previous = index > 0 ? build(ordered[index - 1]) : null;
+      _upNext =
+          index + 1 < ordered.length ? build(ordered[index + 1]) : null;
+      _upNextResolved = true;
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Backgrounding releases the provider connection; a one-connection
@@ -250,6 +452,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _seekFeedback.dispose();
 
     unawaited(WakelockPlus.disable());
+    try {
+      unawaited(ScreenBrightness().resetApplicationScreenBrightness());
+    } catch (_) {}
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     unawaited(SystemChrome.setPreferredOrientations(const [
       DeviceOrientation.portraitUp,
@@ -309,7 +514,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 Video(
                   controller: _player.videoController!,
                   controls: NoVideoControls,
-                  fit: BoxFit.contain,
+                  fit: _fit,
                 ),
 
               if (state.phase == PlaybackPhase.opening ||
@@ -353,15 +558,38 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 ),
 
               if (_controlsVisible && state.phase != PlaybackPhase.failed)
-                _Controls(
+                PlayerControls(
                   player: _player,
                   locked: _locked,
                   title: widget.request.title,
                   subtitle: widget.request.subtitle,
+                  isSeries:
+                      widget.request.section == ContentSection.series,
+                  brightness: _brightness,
+                  fit: _fit,
                   onSeekBy: _seekBy,
+                  onSeekTo: _player.seekTo,
                   onToggleLock: () => setState(() => _locked = !_locked),
+                  onToggleFit: () => setState(() {
+                    _fit = _fit == BoxFit.contain
+                        ? BoxFit.cover
+                        : BoxFit.contain;
+                  }),
                   onBack: () => Navigator.of(context).maybePop(),
                   onInteract: _scheduleHide,
+                  onBrightness: _setBrightness,
+                  onExternalPlayer: _openExternally,
+                  onSpeed: _showSpeedSheet,
+                  onTracks: _showTracksSheet,
+                  onEpisodes:
+                      widget.request.section == ContentSection.series
+                          ? () => Navigator.of(context).maybePop()
+                          : null,
+                  onPrevious: _previous == null
+                      ? null
+                      : () => _playRequest(_previous!),
+                  onNext:
+                      _upNext == null ? null : () => _playRequest(_upNext!),
                 ),
             ],
           ),
@@ -413,237 +641,6 @@ class _ErrorOverlay extends StatelessWidget {
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _Controls extends StatelessWidget {
-  const _Controls({
-    required this.player,
-    required this.locked,
-    required this.title,
-    required this.subtitle,
-    required this.onSeekBy,
-    required this.onToggleLock,
-    required this.onBack,
-    required this.onInteract,
-  });
-
-  final PlayerController player;
-  final bool locked;
-  final String title;
-  final String subtitle;
-  final Future<void> Function(Duration) onSeekBy;
-  final VoidCallback onToggleLock;
-  final VoidCallback onBack;
-  final VoidCallback onInteract;
-
-  static String _fmt(Duration d) {
-    final h = d.inHours;
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return h > 0 ? '$h:$m:$s' : '$m:$s';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final state = player.state;
-
-    if (locked) {
-      return Align(
-        alignment: Alignment.centerRight,
-        child: Padding(
-          padding: const EdgeInsets.all(Insets.lg),
-          child: _RoundButton(
-            icon: Icons.lock_rounded,
-            onTap: onToggleLock,
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(alpha: 0.65),
-            Colors.transparent,
-            Colors.black.withValues(alpha: 0.75),
-          ],
-          stops: const [0, 0.45, 1],
-        ),
-      ),
-      child: Column(
-        children: [
-          // Top bar
-          Padding(
-            padding: const EdgeInsets.all(Insets.md),
-            child: Row(
-              children: [
-                _RoundButton(icon: Icons.arrow_back_rounded, onTap: onBack),
-                const SizedBox(width: Insets.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600),
-                      ),
-                      if (subtitle.isNotEmpty)
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              color: AppColors.textSecondary, fontSize: 12),
-                        ),
-                    ],
-                  ),
-                ),
-                _RoundButton(icon: Icons.lock_open_rounded, onTap: onToggleLock),
-              ],
-            ),
-          ),
-
-          const Spacer(),
-
-          // Transport
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _RoundButton(
-                icon: Icons.replay_10_rounded,
-                size: 52,
-                onTap: () {
-                  onInteract();
-                  onSeekBy(-Playback.seekStep);
-                },
-              ),
-              const SizedBox(width: Insets.xl),
-              _RoundButton(
-                icon: state.isPlaying
-                    ? Icons.pause_rounded
-                    : Icons.play_arrow_rounded,
-                size: 68,
-                accent: true,
-                onTap: () {
-                  onInteract();
-                  player.playPause();
-                },
-              ),
-              const SizedBox(width: Insets.xl),
-              _RoundButton(
-                icon: Icons.forward_10_rounded,
-                size: 52,
-                onTap: () {
-                  onInteract();
-                  onSeekBy(Playback.seekStep);
-                },
-              ),
-            ],
-          ),
-
-          const Spacer(),
-
-          // Progress. Live streams never get a VOD scrubber (spec §23).
-          if (state.showsProgressBar)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  Insets.lg, 0, Insets.lg, Insets.md),
-              child: Row(
-                children: [
-                  Text(_fmt(state.position),
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 12)),
-                  Expanded(
-                    child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 3,
-                        activeTrackColor: AppColors.accent,
-                        inactiveTrackColor: Colors.white24,
-                        thumbColor: AppColors.accent,
-                        thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 7),
-                        overlayShape:
-                            const RoundSliderOverlayShape(overlayRadius: 14),
-                      ),
-                      child: Slider(
-                        value: state.position.inMilliseconds
-                            .clamp(0, state.duration.inMilliseconds)
-                            .toDouble(),
-                        max: state.duration.inMilliseconds.toDouble(),
-                        onChanged: (v) {
-                          onInteract();
-                          player.seekTo(
-                              Duration(milliseconds: v.round()));
-                        },
-                      ),
-                    ),
-                  ),
-                  Text(_fmt(state.duration),
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 12)),
-                ],
-              ),
-            )
-          else
-            const Padding(
-              padding: EdgeInsets.only(bottom: Insets.xl),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.circle, color: AppColors.danger, size: 9),
-                  SizedBox(width: Insets.sm),
-                  Text('LIVE',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700)),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RoundButton extends StatelessWidget {
-  const _RoundButton({
-    required this.icon,
-    required this.onTap,
-    this.size = 40,
-    this.accent = false,
-  });
-
-  final IconData icon;
-  final VoidCallback onTap;
-  final double size;
-  final bool accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: accent ? AppColors.accent : Colors.black.withValues(alpha: 0.45),
-      shape: const CircleBorder(),
-      child: InkWell(
-        onTap: onTap,
-        customBorder: const CircleBorder(),
-        focusColor: Colors.white24,
-        child: SizedBox(
-          width: size,
-          height: size,
-          child: Icon(icon, color: Colors.white, size: size * 0.5),
-        ),
       ),
     );
   }

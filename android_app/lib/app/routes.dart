@@ -2,7 +2,13 @@
 /// app (spec §52, §66).
 abstract final class Routes {
   static const splash = '/';
+  /// Pre-login setup screen (source picker).
   static const login = '/login';
+
+  /// The real Xtream Codes credential form.
+  static const xtreamLogin = '/login/xtream';
+
+  /// Saved Xtream accounts + switcher.
   static const accounts = '/accounts';
   static const license = '/license';
   static const plans = '/plans';
@@ -22,4 +28,9 @@ abstract final class Routes {
   static const search = '/search';
   static const favorites = '/favorites';
   static const settings = '/settings';
+  static const security = '/settings/security';
+
+  /// PIN entry shown at startup when app-lock is on. `extra` carries the
+  /// route to continue to once unlocked.
+  static const lock = '/lock';
 }
