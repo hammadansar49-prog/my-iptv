@@ -9,6 +9,7 @@ import '../../app/routes.dart';
 import '../../data/api/rtdb_api.dart';
 import '../../data/api/rtdb_stream.dart';
 import '../../data/models/json.dart';
+import '../../services/notifications/announcement_push.dart';
 import '../../services/player/player_controller.dart';
 import '../../core/utils/logger.dart';
 import '../providers.dart';
@@ -34,6 +35,7 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
   RtdbStream? _keyStream;
   String? _streamedKey;
   StreamSubscription<void>? _licenseSub;
+  StreamSubscription<int?>? _tapSub;
   Timer? _expiryTimer;
   Timer? _announcementExpiry;
   bool _started = false;
@@ -81,6 +83,15 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
     final license = _ref.read(licenseRepositoryProvider);
     _licenseSub = license.changes.listen((_) => _syncLicenseWatch());
     _syncLicenseWatch();
+
+    // Notification taps (app was closed/backgrounded) must show the popup
+    // even if it was already dismissed once.
+    _tapSub = AnnouncementPush.taps.listen(_onNotificationTap);
+    if (AnnouncementPush.hasPendingTap) {
+      AnnouncementPush.hasPendingTap = false;
+      _onNotificationTap(AnnouncementPush.pendingTap);
+    }
+    unawaited(AnnouncementPush.checkNativeTap());
   }
 
   @override
@@ -94,6 +105,7 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
     _keyStream?.reconnect();
     // A timer does not fire while the process is frozen — re-check expiry.
     _syncLicenseWatch();
+    unawaited(AnnouncementPush.checkNativeTap());
   }
 
   @override
@@ -104,6 +116,7 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
     }
     _keyStream?.stop();
     unawaited(_licenseSub?.cancel());
+    unawaited(_tapSub?.cancel());
     _expiryTimer?.cancel();
     _announcementExpiry?.cancel();
     super.dispose();
@@ -121,7 +134,23 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
 
   // ---- Announcement --------------------------------------------------------
 
+  Object? _rawAnnouncement;
+
+  /// Set by a notification tap: bypasses the "seen once" rule for this
+  /// created_at (or, when [_forceAny], for whatever is current).
+  int? _forceShowAt;
+  bool _forceAny = false;
+
+  void _onNotificationTap(int? createdAt) {
+    _forceShowAt = createdAt;
+    _forceAny = createdAt == null;
+    // If the stream already delivered it, re-evaluate now; otherwise the
+    // first snapshot will.
+    _onAnnouncement(_rawAnnouncement);
+  }
+
   void _onAnnouncement(Object? raw) {
+    _rawAnnouncement = raw;
     final ann = Announcement.fromRaw(raw);
     _announcementExpiry?.cancel();
     if (ann == null) {
@@ -130,7 +159,8 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     final seen = _ref.read(localStoreProvider).read<num>(_kSeenAnnouncement);
-    if (ann.createdAt != null && seen != null && ann.createdAt! <= seen) {
+    final forced = _forceAny || (_forceShowAt != null && ann.createdAt == _forceShowAt);
+    if (!forced && ann.createdAt != null && seen != null && ann.createdAt! <= seen) {
       _setAnnouncement(null);
       return;
     }
@@ -153,6 +183,8 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> dismissAnnouncement({int rating = 0, String comment = ''}) async {
     final ann = _announcement;
     if (ann == null) return;
+    _forceShowAt = null;
+    _forceAny = false;
     _ref.read(localStoreProvider).write(
         _kSeenAnnouncement, ann.createdAt ?? DateTime.now().millisecondsSinceEpoch);
     _setAnnouncement(null);

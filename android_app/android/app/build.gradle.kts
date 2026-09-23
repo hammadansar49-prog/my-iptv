@@ -5,6 +5,12 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// FCM push is optional: the owner drops google-services.json in later. Applying
+// the plugin without the file fails the build, so only apply it when present.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "com.theottdeals.theottdeals"
     compileSdk = flutter.compileSdkVersion
@@ -41,4 +47,10 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // AnnouncementWorker: periodic background poll of iptv/announcement that
+    // runs with the app killed, without keeping the process alive.
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
 }

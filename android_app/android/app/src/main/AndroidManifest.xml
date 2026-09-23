@@ -83,6 +83,17 @@
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="dataSync"/>
+        <!-- FCM data-message announcements (AnnouncementNotifier.kt). Gets the
+             same broadcast as firebase_messaging's own receiver; inert until
+             google-services.json is added. -->
+        <receiver
+            android:name=".AnnouncementPushReceiver"
+            android:exported="true"
+            android:permission="com.google.android.c2dm.permission.SEND">
+            <intent-filter>
+                <action android:name="com.google.android.c2dm.intent.RECEIVE"/>
+            </intent-filter>
+        </receiver>
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

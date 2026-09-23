@@ -48,6 +48,11 @@ dependencies:
   wakelock_plus: ^1.2.8
   url_launcher: ^6.3.1
   screen_brightness: ^2.1.11
+  # Optional instant announcement push (FCM topic iptv_announcements). The app
+  # runs normally without android/app/google-services.json: init is wrapped
+  # and Gradle only applies google-services when the file exists.
+  firebase_core: ^4.15.0
+  firebase_messaging: ^16.7.0
 
 dev_dependencies:
   flutter_test:

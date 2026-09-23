@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +10,7 @@ import '../core/security/device_identity.dart';
 import '../core/storage/local_store.dart';
 import '../core/theme/app_theme.dart';
 import '../core/utils/logger.dart';
+import '../services/notifications/announcement_push.dart';
 import '../presentation/providers.dart';
 
 /// Everything that must exist before the first frame.
@@ -35,6 +38,10 @@ class Bootstrap {
     SystemChrome.setSystemUIOverlayStyle(AppTheme.systemOverlay);
 
     final store = await LocalStore.open();
+
+    // Optional FCM; never blocks or fails startup (no google-services.json
+    // yet). Taps that arrive before the live controller listens are queued.
+    unawaited(AnnouncementPush.init());
 
     var isTv = false;
     try {

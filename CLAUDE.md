@@ -106,6 +106,16 @@ slow/unstable connection.
   `iptv/announcement_reviews/<ms>_<8hex>` in the PC app's exact shape. Updates apply only when
   `platform` is `android`/`all` (missing = pc); Profile → "Check Updates" does a fresh GET. No
   licence stored = app behaves exactly as before; there is intentionally no key-entry gate yet.
+- **Announcement notifications while closed/backgrounded**: native Kotlin, no Dart in the
+  background (`AnnouncementNotifier.kt`). `AnnouncementWorker` (WorkManager, 15 min, network
+  constraint, scheduled from `MainActivity.onCreate` with KEEP) GETs `iptv/announcement.json`;
+  `AnnouncementPushReceiver` handles FCM data messages. Both notify only if `created_at` >
+  Dart LocalStore `lastSeenAnnouncementAt` (read from `filesDir/store.json`) AND > native
+  `lastNotifiedAnnouncementAt`, and never while the activity is resumed. Tap → extra on the
+  singleTop MainActivity → `theottdeals/announcements` `takePendingTap` → controller forces the
+  popup even if already seen. FCM (`lib/services/notifications/announcement_push.dart`, topic
+  `iptv_announcements`) is optional: google-services plugin applies only if
+  `android/app/google-services.json` exists; Cloud Function + setup in `firebase/`.
 
 ## License key system (gate screen in the PC app, backed by theottdeals' own Firebase)
 
