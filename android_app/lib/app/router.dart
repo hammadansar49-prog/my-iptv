@@ -13,6 +13,7 @@ import '../presentation/loading/catalog_loading_screen.dart';
 import '../presentation/movies/movie_detail_screen.dart';
 import '../presentation/movies/movies_screen.dart';
 import '../presentation/player/player_screen.dart';
+import '../presentation/profile/about_screen.dart';
 import '../presentation/security/lock_screen.dart';
 import '../presentation/security/security_screen.dart';
 import '../presentation/series/series_detail_screen.dart';
@@ -107,6 +108,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: Routes.settings,
         builder: (context, state) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: Routes.about,
+        builder: (context, state) => const AboutScreen(),
       ),
       GoRoute(
         path: Routes.security,

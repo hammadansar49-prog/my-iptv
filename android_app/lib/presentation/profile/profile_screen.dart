@@ -283,6 +283,17 @@ class ProfileScreen extends ConsumerWidget {
                   child: Divider(height: 1),
                 ),
                 _SettingsRow(
+                  icon: Icons.info_rounded,
+                  color: AppColors.tileBlue,
+                  title: 'About',
+                  subtitle: 'The developer and owner of this app.',
+                  onTap: () => context.push(Routes.about),
+                ),
+                const Padding(
+                  padding: EdgeInsets.only(left: 68),
+                  child: Divider(height: 1),
+                ),
+                _SettingsRow(
                   icon: Icons.power_settings_new_rounded,
                   color: AppColors.danger,
                   title: 'Logout',

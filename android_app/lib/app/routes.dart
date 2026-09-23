@@ -33,6 +33,7 @@ abstract final class Routes {
   static const favorites = '/favorites';
   static const settings = '/settings';
   static const security = '/settings/security';
+  static const about = '/about';
 
   /// PIN entry shown at startup when app-lock is on. `extra` carries the
   /// route to continue to once unlocked.
