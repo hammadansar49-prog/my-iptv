@@ -30,6 +30,7 @@ class MainActivity : FlutterActivity() {
         PipBridge.attach(engine)
         PermissionBridge.attach(engine, context)
         GalleryBridge.attach(engine, context)
+        DeviceIdBridge.attach(engine, context)
         // Dart pulls a pending announcement-notification tap on start/resume.
         MethodChannel(engine.dartExecutor.binaryMessenger, ANNOUNCEMENT_CHANNEL)
             .setMethodCallHandler { call, result ->

@@ -35,7 +35,7 @@ class LicenseVerdict {
         'revoked' => 'This key has been revoked. Please contact support.',
         'expired' => 'Your subscription has expired. Please renew to continue.',
         'device-limit-reached' =>
-          'This key is already in use on the maximum number of devices.',
+          'This key has already been used. Please contact your seller.',
         'network-error' =>
           'Could not reach the licensing server. Check your connection and try again.',
         _ => 'This key could not be verified.',
@@ -234,6 +234,12 @@ int compareVersions(String a, String b) {
 /// unauthenticated activation PATCH may not be deployed yet. If verification
 /// fails with a permission error, that rule is the thing to check — do not
 /// work around it client-side.
+/// Admin keys are `MYIPTV-XXXXXX-XXXXXX-XXXXXX` in upper case. Phone
+/// keyboards lower-case or pad what people type, and an exact-path lookup
+/// then misses the row and reports a real key as "not recognised".
+String normalizeLicenseKey(String key) =>
+    key.trim().toUpperCase().replaceAll(RegExp(r'\s+'), '');
+
 class RtdbApi {
   RtdbApi({Dio? dio})
       : _dio = dio ??
@@ -350,7 +356,7 @@ class RtdbApi {
   /// at first successful verify, not at generation, so unsold keys do not
   /// expire sitting in inventory.
   Future<LicenseVerdict> verifyKey(String key, String machineId) async {
-    final trimmed = key.trim();
+    final trimmed = normalizeLicenseKey(key);
     if (trimmed.isEmpty) return LicenseVerdict.notFound;
 
     final path = '/iptv/keys/${Uri.encodeComponent(trimmed)}';
@@ -434,7 +440,7 @@ class RtdbApi {
   /// Raw `iptv/keys/<key>` row, read-only; null when it does not exist.
   /// Throws [AppError] when offline so callers can tell the two apart.
   Future<Map<String, dynamic>?> keyRow(String key) async {
-    final trimmed = key.trim();
+    final trimmed = normalizeLicenseKey(key);
     if (trimmed.isEmpty) return null;
     final raw =
         await _request('GET', '/iptv/keys/${Uri.encodeComponent(trimmed)}');
@@ -444,7 +450,7 @@ class RtdbApi {
   /// Port of `checkKeyStatusOnly`. Read-only by design: the frequent
   /// "did the admin revoke this?" poll must never consume a device slot.
   Future<LicenseVerdict> checkKeyStatus(String key) async {
-    final trimmed = key.trim();
+    final trimmed = normalizeLicenseKey(key);
     if (trimmed.isEmpty) return LicenseVerdict.notFound;
     final Object? raw;
     try {

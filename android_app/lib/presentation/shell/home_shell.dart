@@ -10,6 +10,7 @@ import '../epg/epg_screen.dart';
 import '../home/home_screen.dart';
 import '../notifications/notification_onboarding.dart';
 import '../profile/profile_screen.dart';
+import '../../services/player/pip_service.dart';
 import '../../services/player/player_controller.dart';
 import '../providers.dart';
 
@@ -76,13 +77,18 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           _lazy(3, const ProfileScreen()),
         ],
       ),
-      bottomNavigationBar: ref.watch(shellNavHiddenProvider)
-          ? null
-          : _FloatingNavBar(
-        index: _index,
-        tabs: _tabs,
-        onSelect: _select,
-        tv: isTv,
+      // Hidden while a tab plays fullscreen in place, and inside a PiP
+      // window (the window shows the whole activity, bar included).
+      bottomNavigationBar: ValueListenableBuilder<bool>(
+        valueListenable: PipService.inPip,
+        builder: (context, pip, _) => pip || ref.watch(shellNavHiddenProvider)
+            ? const SizedBox.shrink()
+            : _FloatingNavBar(
+                index: _index,
+                tabs: _tabs,
+                onSelect: _select,
+                tv: isTv,
+              ),
       ),
     );
   }

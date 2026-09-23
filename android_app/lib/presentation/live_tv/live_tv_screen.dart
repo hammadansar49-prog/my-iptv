@@ -13,6 +13,7 @@ import '../../data/models/content.dart';
 import '../../data/models/library.dart';
 import '../../services/player/playback_request.dart';
 import '../../services/player/player_controller.dart';
+import '../../services/player/live_pip_mixin.dart';
 import '../providers.dart';
 import '../widgets/category_strip.dart';
 import '../widgets/error_banner.dart';
@@ -34,7 +35,11 @@ class LiveTvScreen extends ConsumerStatefulWidget {
   ConsumerState<LiveTvScreen> createState() => _LiveTvScreenState();
 }
 
-class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
+class _LiveTvScreenState extends ConsumerState<LiveTvScreen>
+    with LivePipMixin<LiveTvScreen> {
+  @override
+  PlayerController? get pipPlayer => _player;
+
   PlayerController? _player;
   LiveChannel? _current;
   bool _fullscreen = false;
@@ -66,6 +71,7 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
   @override
   void initState() {
     super.initState();
+    initLivePip();
     _isTv = ref.read(isTvProvider); // ref is unusable in dispose()
     final initial = widget.initialChannel;
     if (initial != null) {
@@ -75,6 +81,7 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
 
   @override
   void dispose() {
+    disposeLivePip();
     _debounce?.cancel();
     _searchController.dispose();
     // Spec §25: the player and everything it owns goes with the screen.
@@ -93,6 +100,7 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
 
   void _onPlayerChanged() {
     if (mounted) setState(() {});
+    syncLivePip();
   }
 
   Future<void> _play(LiveChannel channel) async {
@@ -163,6 +171,14 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
   @override
   Widget build(BuildContext context) {
     final categoryId = ref.watch(selectedCategoryProvider(ContentSection.live));
+
+    // Inside the PiP window: the picture only, no list or chrome.
+    if (inPip) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: _buildVideo(expanded: true),
+      );
+    }
 
     return PopScope(
       canPop: !_fullscreen,
@@ -267,6 +283,7 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
                     ),
                   ),
                 ),
+                livePipButton(hasMedia: state?.hasMedia ?? false),
                 IconButton(
                   onPressed: _toggleFullscreen,
                   icon: Icon(

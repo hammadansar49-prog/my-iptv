@@ -64,7 +64,22 @@ class XtreamApi {
   ///  2. `auth` 0 or '0' -> bad credentials
   ///  3. `status` present and not 'Active' -> report the status
   Future<XtreamSession> authenticate({CancelToken? cancel}) async {
-    final data = await _http.getJson(_api(''), cancel: cancel);
+    final Object? data;
+    try {
+      data = await _http.getJson(_api(''), cancel: cancel);
+    } on AppError catch (e) {
+      // The panel answered, but refused the login. Many panels reject bad
+      // credentials with an odd status and an empty body — otv.to answers
+      // HTTP 512 — which the generic mapping called "server not
+      // responding". Only true outages (gateway/timeouts/throttling) keep
+      // that message; any other HTTP refusal of the auth call is bad
+      // credentials.
+      final status = RegExp(r'^HTTP (\d+)').firstMatch(e.detail ?? '');
+      final code = int.tryParse(status?.group(1) ?? '');
+      const outage = {408, 429, 502, 503, 504};
+      if (code != null && !outage.contains(code)) throw AppError.badCredentials;
+      rethrow;
+    }
     if (data is! Map) {
       throw const AppError(
         AppErrorKind.authentication,

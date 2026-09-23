@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
 import '../utils/logger.dart';
@@ -13,9 +14,9 @@ import '../utils/logger.dart';
 /// Android does not expose the MAC any more, so the stable inputs available
 /// without extra permissions are used instead:
 ///
-///   ANDROID_ID (`androidInfo.id`)  — survives app reinstall, resets only on
-///                                     factory reset / different signing key
-///   + fingerprint, model, hardware — pins it to this physical device
+///   ANDROID_ID (Settings.Secure, read natively via DeviceIdBridge — NOT
+///   `androidInfo.id`, which is Build.ID) — per device, survives app
+///   reinstall, resets only on factory reset / different signing key.
 ///
 /// The result is sha256-hashed so nothing device-identifying is ever sent or
 /// logged in the clear, exactly as the PC app does.
@@ -26,6 +27,7 @@ class DeviceIdentity {
   static const _tag = 'DeviceIdentity';
 
   final DeviceInfoPlugin _plugin;
+  static const _device = MethodChannel('theottdeals/device');
   String? _cached;
   AndroidDeviceInfo? _info;
 
@@ -43,17 +45,30 @@ class DeviceIdentity {
     final cached = _cached;
     if (cached != null) return cached;
 
-    final info = await androidInfo();
-    final parts = info == null
-        ? const <String>['unknown-device']
-        : <String>[
-            info.id,
-            info.fingerprint,
-            info.model,
-            info.hardware,
-            info.board,
-          ];
-    final digest = sha256.convert(utf8.encode(parts.join('|')));
+    // ANDROID_ID only. `AndroidDeviceInfo.id` is NOT the Android ID — it is
+    // Build.ID, the firmware build string — so the previous formula (that
+    // plus fingerprint/model/hardware/board) was identical for every phone
+    // of the same model and update: a second such phone saw no free trial
+    // and shared the first one's licence binding, and an OS update changed
+    // it. ANDROID_ID is per device (and per signing key), survives
+    // reinstalls, and resets only on factory reset.
+    String? androidId;
+    try {
+      androidId = await _device.invokeMethod<String>('androidId');
+    } catch (e) {
+      Log.e(_tag, 'androidId failed', e);
+    }
+    final String basis;
+    if (androidId != null && androidId.isNotEmpty) {
+      basis = 'android-id|$androidId';
+    } else {
+      final info = await androidInfo();
+      basis = info == null
+          ? 'unknown-device'
+          : [info.id, info.fingerprint, info.model, info.hardware, info.board]
+              .join('|');
+    }
+    final digest = sha256.convert(utf8.encode(basis));
     return _cached = digest.toString();
   }
 

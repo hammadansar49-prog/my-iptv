@@ -15,6 +15,7 @@ import '../../data/models/content.dart';
 import '../../data/models/epg.dart';
 import '../../services/player/playback_request.dart';
 import '../../services/player/player_controller.dart';
+import '../../services/player/live_pip_mixin.dart';
 import '../providers.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/network_artwork.dart';
@@ -42,7 +43,11 @@ class EpgScreen extends ConsumerStatefulWidget {
   ConsumerState<EpgScreen> createState() => _EpgScreenState();
 }
 
-class _EpgScreenState extends ConsumerState<EpgScreen> {
+class _EpgScreenState extends ConsumerState<EpgScreen>
+    with LivePipMixin<EpgScreen> {
+  @override
+  PlayerController? get pipPlayer => _player;
+
   /// Layout scale for the timeline.
   static const _pxPerMinute = 4.0;
   static const _slotMinutes = 30;
@@ -109,6 +114,7 @@ class _EpgScreenState extends ConsumerState<EpgScreen> {
   @override
   void initState() {
     super.initState();
+    initLivePip();
     _origin = _alignToSlot(
       DateTime.now().subtract(const Duration(hours: _hoursBefore)),
     );
@@ -138,6 +144,7 @@ class _EpgScreenState extends ConsumerState<EpgScreen> {
 
   @override
   void dispose() {
+    disposeLivePip();
     _clock?.cancel();
     _searchDebounce?.cancel();
     _searchController.dispose();
@@ -157,6 +164,7 @@ class _EpgScreenState extends ConsumerState<EpgScreen> {
 
   void _onPlayerChanged() {
     if (mounted) setState(() {});
+    syncLivePip();
   }
 
   Future<void> _play(LiveChannel channel) async {
@@ -298,6 +306,13 @@ class _EpgScreenState extends ConsumerState<EpgScreen> {
         : ref.watch(liveChannelsProvider('')).valueOrNull ?? const [];
     final pinned = _resolvePinned(pinIds, allChannels);
     final searching = _query.isNotEmpty;
+
+    if (inPip) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: _buildPlayer(expanded: true),
+      );
+    }
 
     if (_fullscreen) {
       return PopScope(
@@ -574,7 +589,17 @@ class _EpgScreenState extends ConsumerState<EpgScreen> {
       fit: StackFit.expand,
       children: [
         surface,
-        if (hasMedia)
+        if (hasMedia && pipSupported && !inPip)
+          Positioned(
+            right: Insets.sm + 52,
+            bottom: Insets.sm,
+            child: Material(
+              color: Colors.black.withValues(alpha: 0.5),
+              shape: const CircleBorder(),
+              child: livePipButton(hasMedia: hasMedia),
+            ),
+          ),
+        if (hasMedia && !inPip)
           Positioned(
             right: Insets.sm,
             bottom: Insets.sm,

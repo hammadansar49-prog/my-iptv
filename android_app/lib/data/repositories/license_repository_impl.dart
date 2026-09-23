@@ -82,7 +82,7 @@ class LicenseRepositoryImpl implements LicenseRepository {
     final machineId = await _identity.machineId();
     final verdict = await _api.verifyKey(key, machineId);
     if (verdict.valid) {
-      _key = key.trim();
+      _key = normalizeLicenseKey(key);
       _current = verdict;
       _lastChecked = DateTime.now();
       await _save();

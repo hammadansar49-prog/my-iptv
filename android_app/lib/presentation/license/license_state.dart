@@ -103,7 +103,7 @@ abstract final class LicenseActions {
     SubscriptionPlan plan,
     List<SubscriptionPlan> allPlans,
   ) async {
-    final trimmed = key.trim();
+    final trimmed = normalizeLicenseKey(key);
     if (trimmed.isEmpty) return 'Enter your licence key.';
     final Map<String, dynamic>? row;
     try {
