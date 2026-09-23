@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/theme/app_theme.dart';
+import '../presentation/iptv_live/iptv_live_layer.dart';
 import '../presentation/providers.dart';
 import 'router.dart';
 
@@ -36,7 +37,10 @@ class TheOttDealsApp extends ConsumerWidget {
           data: media.copyWith(
             textScaler: TextScaler.linear(system * narrow),
           ),
-          child: child ?? const SizedBox.shrink(),
+          // Announcements, the licence block and update prompts render
+          // above the Navigator so they cover every route, fullscreen
+          // player included.
+          child: IptvLiveLayer(child: child ?? const SizedBox.shrink()),
         );
       },
     );

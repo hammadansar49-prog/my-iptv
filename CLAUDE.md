@@ -90,6 +90,22 @@ slow/unstable connection.
   problem as the `hwdec: 'no'` note above — a rendering backend that is fine on an emulator/some
   devices and silently broken on a real one — so don't re-enable Impeller without testing on real
   hardware (ideally more than one device/GPU) first.
+- **Admin-panel wiring (license / announcement / update)**, the Android twin of `iptvLiveCache` +
+  `startLicenseStream`: `lib/data/api/rtdb_stream.dart` (`RtdbStream`) is the SSE client
+  (`Accept: text/event-stream`, applies `put`/`patch` to a local copy so there's no re-GET, backoff
+  reconnect, 75s keep-alive watchdog, forced reconnect on app resume).
+  `lib/presentation/iptv_live/iptv_live_controller.dart` (`iptvLiveProvider`) streams
+  `iptv/announcement`, `iptv/update`, `iptv/settings` from app start and `iptv/keys/<storedKey>`
+  whenever `LicenseRepositoryImpl.changes` says a key is stored (trials: local `expiresAt` timer
+  only). A revoked/deleted/non-`active`/expired key → `PlayerController.stopActive()`,
+  `DownloadManager.pauseAll()`, pop `/player`/`/live`, and a blocking "Subscription ended" screen
+  (WhatsApp from `iptv/settings.whatsappNumber`) that lifts live if the admin restores/extends.
+  `lib/presentation/iptv_live/iptv_live_layer.dart` renders everything from `MaterialApp.router`'s
+  `builder` (above the Navigator, so it covers the fullscreen player). Announcements show once per
+  `created_at` (LocalStore `lastSeenAnnouncementAt`); feedback goes to
+  `iptv/announcement_reviews/<ms>_<8hex>` in the PC app's exact shape. Updates apply only when
+  `platform` is `android`/`all` (missing = pc); Profile → "Check Updates" does a fresh GET. No
+  licence stored = app behaves exactly as before; there is intentionally no key-entry gate yet.
 
 ## License key system (gate screen in the PC app, backed by theottdeals' own Firebase)
 

@@ -7,6 +7,7 @@ import '../../app/routes.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../auth/auth_controller.dart';
+import '../iptv_live/iptv_live_layer.dart';
 import '../providers.dart';
 
 /// Account summary modelled on the design screenshot: avatar + status pill,
@@ -277,6 +278,17 @@ class ProfileScreen extends ConsumerWidget {
                   title: 'Security',
                   subtitle: 'Lock the app behind a passcode.',
                   onTap: () => context.push(Routes.security),
+                ),
+                const Padding(
+                  padding: EdgeInsets.only(left: 68),
+                  child: Divider(height: 1),
+                ),
+                _SettingsRow(
+                  icon: Icons.system_update_rounded,
+                  color: AppColors.tileGreen,
+                  title: 'Check Updates',
+                  subtitle: 'See if a newer version of the app is out.',
+                  onTap: () => checkForUpdatesManually(context, ref),
                 ),
                 const Padding(
                   padding: EdgeInsets.only(left: 68),

@@ -261,6 +261,22 @@ class DownloadManager {
     unawaited(_pump());
   }
 
+  /// Pause every unfinished download. Used when the subscription ends
+  /// mid-session (the licence watcher), so nothing keeps pulling from the
+  /// provider behind the "Subscription ended" screen.
+  Future<void> pauseAll() async {
+    final ids = _items
+        .where((it) =>
+            it.status == DownloadStatus.downloading ||
+            it.status == DownloadStatus.queued ||
+            it.status == DownloadStatus.waiting)
+        .map((it) => it.id)
+        .toList();
+    for (final id in ids) {
+      await pause(id);
+    }
+  }
+
   Future<void> resume(String id) async {
     final item = _find(id);
     if (item == null ||

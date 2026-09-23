@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../core/constants/app_constants.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/storage/secure_store.dart';
@@ -30,6 +32,15 @@ class LicenseRepositoryImpl implements LicenseRepository {
   String? _key;
   DateTime? _lastChecked;
 
+  /// Fires whenever the stored license changes (restored, verified,
+  /// trial claimed, cleared) so the live watcher can (re)subscribe to the
+  /// right `iptv/keys/<key>` stream without polling.
+  final _changes = StreamController<void>.broadcast();
+  Stream<void> get changes => _changes.stream;
+
+  /// The stored key string; null for a trial or when nothing is stored.
+  String? get key => _key;
+
   @override
   LicenseVerdict? get current => _current;
 
@@ -49,9 +60,11 @@ class LicenseRepositoryImpl implements LicenseRepository {
     _lastChecked = asUnixMillis(saved['lastVerifiedAt']);
     _current = LicenseVerdict.fromJson(saved);
     Log.i(_tag, 'restored license (trial=${_current?.isTrial})');
+    _changes.add(null);
   }
 
   Future<void> _save() async {
+    _changes.add(null);
     final v = _current;
     if (v == null || !v.valid) {
       await _store.writeLicense(null);
@@ -147,7 +160,8 @@ class LicenseRepositoryImpl implements LicenseRepository {
   Future<String?> supportWhatsAppNumber() async {
     try {
       final settings = await _api.settings();
-      return asStringOrNull(settings['whatsapp']) ??
+      return asStringOrNull(settings['whatsappNumber']) ??
+          asStringOrNull(settings['whatsapp']) ??
           asStringOrNull(settings['whatsapp_number']);
     } catch (e) {
       Log.w(_tag, 'settings fetch failed: $e');
@@ -160,6 +174,7 @@ class LicenseRepositoryImpl implements LicenseRepository {
     _current = null;
     _key = null;
     _lastChecked = null;
+    _changes.add(null);
     await _store.writeLicense(null);
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:dio/dio.dart';
 
@@ -120,6 +121,96 @@ class TrialConfig {
   }
 }
 
+/// `iptv/announcement` as the theottdeals admin panel writes it.
+class Announcement {
+  const Announcement({
+    required this.text,
+    this.createdAt,
+    this.expiresAt,
+    this.collectFeedback = false,
+  });
+
+  final String text;
+
+  /// Epoch millis. Doubles as the announcement's identity for "seen once".
+  final int? createdAt;
+  final int? expiresAt;
+  final bool collectFeedback;
+
+  /// Same rule as main.js refreshAnnouncement: no text or already expired
+  /// means "no announcement".
+  static Announcement? fromRaw(Object? raw) {
+    if (raw is! Map) return null;
+    final text = asString(raw['text']).trim();
+    if (text.isEmpty) return null;
+    final expires = asIntOrNull(raw['expires_at']);
+    if (expires != null && expires > 0 &&
+        expires < DateTime.now().millisecondsSinceEpoch) {
+      return null;
+    }
+    return Announcement(
+      text: text,
+      createdAt: asIntOrNull(raw['created_at']),
+      expiresAt: expires != null && expires > 0 ? expires : null,
+      collectFeedback: asBool(raw['collect_feedback']),
+    );
+  }
+}
+
+/// `iptv/update` as the admin panel writes it.
+class UpdateInfo {
+  const UpdateInfo({
+    required this.version,
+    this.downloadUrl = '',
+    this.notes = '',
+    this.forceUpdate = false,
+    this.platform = 'pc',
+  });
+
+  final String version;
+  final String downloadUrl;
+  final String notes;
+  final bool forceUpdate;
+
+  /// pc | android | all. Missing means "pc" (entries written before the
+  /// selector existed), exactly as main.js's update:check reads it.
+  final String platform;
+
+  bool get appliesToAndroid => platform == 'android' || platform == 'all';
+
+  static UpdateInfo? fromRaw(Object? raw) {
+    if (raw is! Map) return null;
+    final version = asString(raw['version']).trim();
+    if (version.isEmpty) return null;
+    return UpdateInfo(
+      version: version,
+      downloadUrl: asString(raw['download_url']).trim(),
+      notes: asString(raw['notes']),
+      forceUpdate: asBool(raw['force_update']),
+      platform: asString(raw['platform'], 'pc'),
+    );
+  }
+}
+
+/// main.js compareVersions: plain numeric dotted comparison (no pre-release
+/// suffixes in either app). A leading "v" and any "+build" are ignored.
+int compareVersions(String a, String b) {
+  List<int> parts(String v) => v
+      .trim()
+      .replaceFirst(RegExp('^[vV]'), '')
+      .split('+')
+      .first
+      .split('.')
+      .map((n) => int.tryParse(n.trim()) ?? 0)
+      .toList();
+  final pa = parts(a), pb = parts(b);
+  for (var i = 0; i < max(pa.length, pb.length); i++) {
+    final d = (i < pa.length ? pa[i] : 0) - (i < pb.length ? pb[i] : 0);
+    if (d != 0) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
 /// Firebase Realtime Database REST client.
 ///
 /// Plain HTTPS against `{base}{path}.json`, no SDK and no credentials — these
@@ -214,6 +305,31 @@ class RtdbApi {
 
   Future<TrialConfig> trialConfig() async =>
       TrialConfig.fromJson(asMap(await _request('GET', '/iptv/trial_config')));
+
+  /// Fresh read, not the live cache — same reasoning as main.js update:check:
+  /// an explicit "Check Updates" tap must not race the stream's first
+  /// snapshot and wrongly say "up to date".
+  Future<UpdateInfo?> update() async =>
+      UpdateInfo.fromRaw(await _request('GET', '/iptv/update'));
+
+  /// Port of main.js `announcement:submitReview` — same id format and body
+  /// so the admin panel's reviews list reads both apps identically.
+  Future<void> submitAnnouncementReview({
+    required int rating,
+    required String comment,
+    int? announcementCreatedAt,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final rnd = Random.secure();
+    final hex = List.generate(4, (_) => rnd.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+    final trimmed = comment.trim();
+    await _request('PUT', '/iptv/announcement_reviews/${now}_$hex', {
+      'rating': rating.clamp(1, 5),
+      'comment': trimmed.length > 1000 ? trimmed.substring(0, 1000) : trimmed,
+      'announcement_created_at': announcementCreatedAt,
+      'submitted_at': now,
+    });
+  }
 
   // ---- Keys ---------------------------------------------------------------
 
