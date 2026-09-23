@@ -9,6 +9,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/app_orientation.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/content.dart';
 import '../../data/models/epg.dart';
@@ -72,6 +73,32 @@ class _EpgScreenState extends ConsumerState<EpgScreen> {
   /// category) - someone typing a name wants that channel wherever it lives.
   /// Debounced so a fast typist over ~16k channels doesn't rank on every key.
   bool _searchOpen = false;
+
+  /// Fullscreen in place (same Player, no reconnect), like Live TV.
+  bool _fullscreen = false;
+
+  void _setFullscreen(bool on) {
+    if (_fullscreen == on) return;
+    setState(() => _fullscreen = on);
+    ref.read(shellNavHiddenProvider.notifier).state = on;
+    if (on) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      AppOrientation.restore(isTv: ref.read(isTvProvider));
+    }
+  }
+
+  /// Swipe up on the video enters fullscreen; swipe down leaves it.
+  void _onVideoDragEnd(DragEndDetails d) {
+    final v = d.primaryVelocity ?? 0;
+    if (v < -250 && !_fullscreen) _setFullscreen(true);
+    if (v > 250 && _fullscreen) _setFullscreen(false);
+  }
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
   Timer? _searchDebounce;
@@ -272,6 +299,19 @@ class _EpgScreenState extends ConsumerState<EpgScreen> {
     final pinned = _resolvePinned(pinIds, allChannels);
     final searching = _query.isNotEmpty;
 
+    if (_fullscreen) {
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _setFullscreen(false);
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: _buildPlayer(expanded: true),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -429,13 +469,13 @@ class _EpgScreenState extends ConsumerState<EpgScreen> {
     );
   }
 
-  Widget _buildPlayer() {
+  Widget _buildPlayer({bool expanded = false}) {
     final player = _player;
     final state = player?.state;
     final channel = _current;
 
-    return AspectRatio(
-      aspectRatio: 16 / 9,
+    final surface = GestureDetector(
+      onVerticalDragEnd: _onVideoDragEnd,
       child: Container(
         color: Colors.black,
         child: Stack(
@@ -528,6 +568,34 @@ class _EpgScreenState extends ConsumerState<EpgScreen> {
         ),
       ),
     );
+
+    final hasMedia = state != null && state.hasMedia;
+    final framed = Stack(
+      fit: StackFit.expand,
+      children: [
+        surface,
+        if (hasMedia)
+          Positioned(
+            right: Insets.sm,
+            bottom: Insets.sm,
+            child: Material(
+              color: Colors.black.withValues(alpha: 0.5),
+              shape: const CircleBorder(),
+              child: IconButton(
+                tooltip: _fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+                onPressed: () => _setFullscreen(!_fullscreen),
+                icon: Icon(
+                  _fullscreen
+                      ? Icons.fullscreen_exit_rounded
+                      : Icons.fullscreen_rounded,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+    return expanded ? framed : AspectRatio(aspectRatio: 16 / 9, child: framed);
   }
 
   /// The time ruler. Scrolls in lockstep with the rows below.

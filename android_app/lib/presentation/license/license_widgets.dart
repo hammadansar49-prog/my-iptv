@@ -250,14 +250,21 @@ class _LicenseBadgeState extends ConsumerState<LicenseBadge> {
     if (status.isTrial) {
       title = 'FREE TRIAL';
       detail = left == null ? null : formatCountdown(left);
-      fg = Colors.black;
+      fg = const Color(0xFF2B1D00);
+      // Warm gold, not neon yellow: the flat #FFD60A plus a wide glow
+      // bloomed against the dark header and read as a smudge.
       decoration = BoxDecoration(
-        color: const Color(0xFFFFD60A),
-        borderRadius: BorderRadius.circular(999),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFE08A), Color(0xFFFFC23D), Color(0xFFF2A007)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFFFD60A).withValues(alpha: 0.35),
-            blurRadius: 12,
+            color: const Color(0xFFF2A007).withValues(alpha: 0.25),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       );
@@ -278,11 +285,12 @@ class _LicenseBadgeState extends ConsumerState<LicenseBadge> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: AppColors.accent.withValues(alpha: 0.45),
-            blurRadius: 12,
+            color: AppColors.accent.withValues(alpha: 0.3),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       );
@@ -293,8 +301,11 @@ class _LicenseBadgeState extends ConsumerState<LicenseBadge> {
       label: '$title ${detail ?? ''}, view plans',
       child: GestureDetector(
         onTap: () => context.push(Routes.plans),
+        // Two short lines (label over countdown) instead of one long one:
+        // on a 360dp phone "FREE TRIAL 23:59:59" on one line did not fit
+        // beside the title and was cut off mid-word.
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          padding: const EdgeInsets.fromLTRB(8, 4, 10, 4),
           decoration: decoration,
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -303,31 +314,37 @@ class _LicenseBadgeState extends ConsumerState<LicenseBadge> {
                 status.isTrial
                     ? Icons.bolt_rounded
                     : Icons.workspace_premium_rounded,
-                size: 14,
+                size: 16,
                 color: fg,
               ),
               const SizedBox(width: 4),
-              Text(
-                title,
-                style: TextStyle(
-                  color: fg,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.8,
-                ),
-              ),
-              if (detail != null) ...[
-                const SizedBox(width: 6),
-                Text(
-                  detail,
-                  style: TextStyle(
-                    color: fg,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: 8.5,
+                      height: 1.1,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1,
+                    ),
                   ),
-                ),
-              ],
+                  if (detail != null)
+                    Text(
+                      detail,
+                      style: TextStyle(
+                        color: fg,
+                        fontSize: 12,
+                        height: 1.15,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                ],
+              ),
             ],
           ),
         ),

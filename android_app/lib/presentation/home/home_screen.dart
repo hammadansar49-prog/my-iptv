@@ -321,7 +321,9 @@ class _TitleBar extends StatelessWidget {
             children: [
               Text('MY IPTV', style: title),
               const SizedBox(width: 10),
-              const Flexible(child: LicenseBadge()),
+              // Intrinsic width (it is compact); Flexible beside a Spacer
+              // only granted it half the free space and clipped it.
+              const LicenseBadge(),
               const Spacer(),
               ValueListenableBuilder<bool>(
                 valueListenable: searchOffscreen,

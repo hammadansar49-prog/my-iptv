@@ -37,6 +37,10 @@ final appLockProvider =
   return AppLockController(ref.watch(secureStoreProvider));
 });
 
+/// Set while a tab shows video fullscreen in place (EPG), so the shell
+/// hides its floating nav bar over the picture.
+final shellNavHiddenProvider = StateProvider<bool>((ref) => false);
+
 /// True on Android TV. Drives every adaptive-layout decision (spec §36).
 final isTvProvider = Provider<bool>((ref) => false);
 

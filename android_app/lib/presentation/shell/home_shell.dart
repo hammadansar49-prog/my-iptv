@@ -62,7 +62,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           _lazy(3, const ProfileScreen()),
         ],
       ),
-      bottomNavigationBar: _FloatingNavBar(
+      bottomNavigationBar: ref.watch(shellNavHiddenProvider)
+          ? null
+          : _FloatingNavBar(
         index: _index,
         tabs: _tabs,
         onSelect: _select,
