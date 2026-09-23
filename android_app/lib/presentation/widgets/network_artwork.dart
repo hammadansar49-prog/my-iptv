@@ -20,6 +20,8 @@ class NetworkArtwork extends StatelessWidget {
     this.fit = BoxFit.cover,
     this.fallbackIcon = Icons.movie_outlined,
     this.fallbackLabel,
+    this.fallback,
+    this.placeholderColor = AppColors.surfaceHigh,
   });
 
   final String? url;
@@ -29,6 +31,16 @@ class NetworkArtwork extends StatelessWidget {
   final BoxFit fit;
   final IconData fallbackIcon;
   final String? fallbackLabel;
+
+  /// Replaces the two-initials tile when the url is unusable or the load
+  /// fails. Home's rows show hundreds of posters from panels that often
+  /// ship broken artwork, and two letters there are not enough to tell one
+  /// title from another.
+  final Widget? fallback;
+
+  /// Shown while the image loads. A logo drawn inside a padded tile needs
+  /// this to match the tile, or a lighter box flashes inside it.
+  final Color placeholderColor;
 
   bool get _usable {
     final u = url?.trim();
@@ -44,14 +56,18 @@ class NetworkArtwork extends StatelessWidget {
     final radius = borderRadius ?? BorderRadius.circular(Radii.md);
     final dpr = MediaQuery.devicePixelRatioOf(context);
 
+    Widget broken() => fallback != null
+        ? SizedBox(width: width, height: height, child: fallback)
+        : _Fallback(
+            icon: fallbackIcon,
+            label: fallbackLabel,
+            width: width,
+            height: height,
+          );
+
     Widget content;
     if (!_usable) {
-      content = _Fallback(
-        icon: fallbackIcon,
-        label: fallbackLabel,
-        width: width,
-        height: height,
-      );
+      content = broken();
     } else {
       content = CachedNetworkImage(
         imageUrl: url!.trim(),
@@ -64,14 +80,9 @@ class NetworkArtwork extends StatelessWidget {
         placeholder: (context, _) => Container(
           width: width,
           height: height,
-          color: AppColors.surfaceHigh,
+          color: placeholderColor,
         ),
-        errorWidget: (context, _, __) => _Fallback(
-          icon: fallbackIcon,
-          label: fallbackLabel,
-          width: width,
-          height: height,
-        ),
+        errorWidget: (context, _, __) => broken(),
       );
     }
 

@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -91,33 +93,43 @@ class _FloatingNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(Radii.pill);
     return SafeArea(
       top: false,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(Insets.lg, 0, Insets.lg, Insets.md),
-        child: Container(
-          // 66 was 5px too short for a selected phone tab: icon (22) + its
-          // selected-state padding (8+8) + the label gap (2) + the label
-          // text overflowed the Column's available height by exactly
-          // 5.0px (confirmed via a real-device layout exception), which
-          // painted a yellow/black overflow banner over the nav bar.
-          height: tv ? 76 : 72,
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(Radii.pill),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: Insets.sm),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              for (var i = 0; i < tabs.length; i++)
-                _NavItem(
-                  spec: tabs[i],
-                  selected: i == index,
-                  onTap: () => onSelect(i),
-                  tv: tv,
-                ),
-            ],
+        padding: const EdgeInsets.fromLTRB(Insets.lg, 0, Insets.lg, Insets.md),
+        // Frosted glass: Home's rows scroll under the bar (extendBody), so
+        // it is translucent and blurs what passes beneath it.
+        child: ClipRRect(
+          borderRadius: radius,
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: Container(
+              // 66 was 5px too short for a selected phone tab: icon (22) + its
+              // selected-state padding (8+8) + the label gap (2) + the label
+              // text overflowed the Column's available height by exactly
+              // 5.0px (confirmed via a real-device layout exception), which
+              // painted a yellow/black overflow banner over the nav bar.
+              height: tv ? 76 : 72,
+              decoration: BoxDecoration(
+                color: const Color(0xB31B1B1D),
+                borderRadius: radius,
+                border: Border.all(color: const Color(0x1FFFFFFF)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: Insets.sm),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  for (var i = 0; i < tabs.length; i++)
+                    _NavItem(
+                      spec: tabs[i],
+                      selected: i == index,
+                      onTap: () => onSelect(i),
+                      tv: tv,
+                    ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -138,49 +150,61 @@ class _NavItem extends StatelessWidget {
   final VoidCallback onTap;
   final bool tv;
 
+  /// Darker than the glass around it, so the selected tab reads as a
+  /// recessed capsule rather than a coloured blob.
+  static const _capsule = Color(0xE60A0A0B);
+
   @override
   Widget build(BuildContext context) {
     final color = selected ? AppColors.accent : AppColors.textPrimary;
     final iconSize = tv ? 26.0 : 22.0;
+    final radius = BorderRadius.circular(Radii.pill);
     return Expanded(
       child: Semantics(
         button: true,
         selected: selected,
         label: spec.label,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(Radii.pill),
-          // TV needs a visible focus ring on every interactive item (§36).
-          focusColor: AppColors.accentSoft,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: Insets.sm),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  padding: EdgeInsets.all(selected ? Insets.sm : 0),
-                  decoration: BoxDecoration(
-                    color: selected ? AppColors.accent : Colors.transparent,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    selected ? spec.activeIcon : spec.icon,
-                    color: selected ? Colors.white : color,
-                    size: iconSize,
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              vertical: Insets.xs + 2, horizontal: 2),
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: radius,
+              // TV needs a visible focus ring on every interactive item (§36).
+              focusColor: AppColors.accentSoft,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                decoration: BoxDecoration(
+                  color: selected ? _capsule : Colors.transparent,
+                  borderRadius: radius,
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  spec.label,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: tv ? 13 : 11,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                  ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      selected ? spec.activeIcon : spec.icon,
+                      color: color,
+                      size: iconSize,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      spec.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.fade,
+                      softWrap: false,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: tv ? 13 : 11,
+                        fontWeight:
+                            selected ? FontWeight.w600 : FontWeight.w400,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),

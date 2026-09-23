@@ -7,6 +7,7 @@ import '../../domain/repositories/repositories.dart';
 import '../api/xtream_api.dart';
 import '../models/content.dart';
 import '../models/epg.dart';
+import '../models/library.dart';
 
 /// A value plus when it was fetched.
 class _Cached<T> {
@@ -283,6 +284,23 @@ class ContentRepositoryImpl implements ContentRepository {
   @override
   String episodeUrl(Episode episode) =>
       _api.episodeStreamUrl(episode.id, ext: episode.ext);
+
+  @override
+  String replayUrl(PlaybackRef ref) {
+    // Same defaults as Movie.ext / Episode.ext / liveUrl, so a ref recorded
+    // without an ext still resolves to the URL the detail screens build.
+    switch (ref.section) {
+      case ContentSection.live:
+        return _api.liveStreamUrl(int.tryParse(ref.streamId) ?? 0,
+            ext: ref.ext ?? 'm3u8');
+      case ContentSection.movies:
+        return _api.movieStreamUrl(int.tryParse(ref.streamId) ?? 0,
+            ext: ref.ext ?? 'mp4');
+      case ContentSection.series:
+        return _api.episodeStreamUrl(ref.episodeId ?? ref.streamId,
+            ext: ref.ext ?? 'mp4');
+    }
+  }
 
   @override
   Future<int> preload(

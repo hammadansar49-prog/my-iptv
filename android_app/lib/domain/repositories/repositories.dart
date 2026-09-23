@@ -50,6 +50,12 @@ abstract interface class ContentRepository {
   String movieUrl(Movie movie);
   String episodeUrl(Episode episode);
 
+  /// Stream URL for a history row's [PlaybackRef], without the full
+  /// [Movie]/[Episode]. Continue Watching resumes from history alone, and
+  /// the result must be byte-identical to [movieUrl]/[episodeUrl] so the
+  /// player still finds a completed download for it.
+  String replayUrl(PlaybackRef ref);
+
   /// Fetch one section's full catalogue into the cache ahead of time — the
   /// post-login loading screen. [onBytes] reports real download progress
   /// (`total` is -1 when the panel sends no Content-Length). Returns the
@@ -78,6 +84,9 @@ abstract interface class LibraryRepository {
     required Duration position,
     required Duration duration,
   });
+
+  /// Drop one history row (Home's "Remove from Continue Watching").
+  Future<void> removeHistory(String key);
 
   Future<void> clearHistory();
 }

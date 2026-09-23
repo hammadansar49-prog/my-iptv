@@ -104,6 +104,19 @@ class LibraryRepositoryImpl implements LibraryRepository {
       _store.write(_kHistory, _history.map((h) => h.toJson()).toList());
 
   @override
+  Future<void> removeHistory(String key) async {
+    final before = _history.length;
+    _history.removeWhere((h) => h.key == key);
+    if (_history.length == before) return;
+    _lastWrite.remove(key);
+    // Flushed immediately: a removal the user asked for must not come back
+    // because the app was killed before the next throttled write.
+    _persistHistory();
+    await _store.flush();
+    _changes.add(null);
+  }
+
+  @override
   Future<void> clearHistory() async {
     _history = [];
     _lastWrite.clear();
