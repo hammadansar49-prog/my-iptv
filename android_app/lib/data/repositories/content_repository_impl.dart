@@ -46,7 +46,15 @@ class ContentRepositoryImpl implements ContentRepository {
   Future<T> _once<T>(String key, Future<T> Function() body) {
     final existing = _inFlight[key];
     if (existing != null) return existing as Future<T>;
-    final future = body().whenComplete(() => _inFlight.remove(key));
+    // Block body, NOT `() => _inFlight.remove(key)`: remove() returns the
+    // stored Future — which is this very `future` — and whenComplete waits
+    // on any Future its callback returns. The arrow form therefore made
+    // every catalogue future wait on itself forever: the data downloaded
+    // and parsed fine, but Home/Movies/Series/Live/EPG never received it
+    // and spun on "loading" indefinitely. This was the original bug.
+    final future = body().whenComplete(() {
+      _inFlight.remove(key);
+    });
     _inFlight[key] = future;
     return future;
   }

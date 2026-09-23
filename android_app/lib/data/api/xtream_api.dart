@@ -1,11 +1,41 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show compute;
 
 import '../../core/errors/app_error.dart';
 import '../../core/network/http_client.dart';
+import '../../core/utils/logger.dart';
 import '../models/account.dart';
 import '../models/content.dart';
 import '../models/epg.dart';
 import '../models/json.dart';
+
+/// Decode + map a catalogue response entirely inside a background isolate.
+///
+/// On a real account the raw `get_vod_streams` answer ran 27MB+ (confirmed
+/// on-device) — every original key, every raw string, for every one of the
+/// tens of thousands of movies. Decoding that alone on the main isolate
+/// freezes the UI for the whole parse (the loading spinner itself stops
+/// animating). Moving *only* the decode off-isolate is still not enough:
+/// `compute()` then has to copy the entire decoded structure (every nested
+/// Map, every original key/string) back across the isolate boundary, which
+/// for a graph this size can take just as long as the parse itself, or
+/// longer, and was observed to make Movies effectively never finish
+/// loading in practice. Doing the decode AND the fromJson mapping here
+/// means only the final, lean `Movie`/`Series`/`LiveChannel` list — a
+/// handful of small fields each — has to cross back, not the raw payload.
+List<T> _decodeAndMap<T>(_DecodeJob<T> job) {
+  final trimmed = job.raw.trim();
+  if (trimmed.isEmpty || trimmed == 'null') return const [];
+  return asMapList(jsonDecode(trimmed)).map(job.fromJson).toList();
+}
+
+class _DecodeJob<T> {
+  const _DecodeJob(this.raw, this.fromJson);
+  final String raw;
+  final T Function(Map<String, dynamic>) fromJson;
+}
 
 /// Xtream Codes client. A direct port of `src/xtream.js`, including its
 /// validation rules — see AUDIT.md §2. Do not add endpoints that the PC app
@@ -89,27 +119,51 @@ class XtreamApi {
     String? categoryId,
     CancelToken? cancel,
   }) async {
-    final data = await _http.getJson(
+    final text = await _http.getText(
       _api('get_live_streams', _categoryParam(categoryId)),
       cancel: cancel,
     );
-    return asMapList(data).map(LiveChannel.fromJson).toList();
+    return _parseCatalogue('live', text, LiveChannel.fromJson);
   }
 
   Future<List<Movie>> vodStreams({String? categoryId, CancelToken? cancel}) async {
-    final data = await _http.getJson(
+    final text = await _http.getText(
       _api('get_vod_streams', _categoryParam(categoryId)),
       cancel: cancel,
     );
-    return asMapList(data).map(Movie.fromJson).toList();
+    return _parseCatalogue('movies', text, Movie.fromJson);
   }
 
   Future<List<Series>> series({String? categoryId, CancelToken? cancel}) async {
-    final data = await _http.getJson(
+    final text = await _http.getText(
       _api('get_series', _categoryParam(categoryId)),
       cancel: cancel,
     );
-    return asMapList(data).map(Series.fromJson).toList();
+    return _parseCatalogue('series', text, Series.fromJson);
+  }
+
+  Future<List<T>> _parseCatalogue<T>(
+    String what,
+    String text,
+    T Function(Map<String, dynamic>) fromJson,
+  ) async {
+    final sw = Stopwatch()..start();
+    try {
+      final list = await compute<_DecodeJob<T>, List<T>>(
+        _decodeAndMap<T>,
+        _DecodeJob<T>(text, fromJson),
+      );
+      Log.i('XtreamApi', 'parsed $what: ${list.length} rows in ${sw.elapsedMilliseconds}ms');
+      return list;
+    } on FormatException catch (e) {
+      // An HTML login/error page where JSON was expected (spec §24).
+      Log.e('XtreamApi', 'parse $what failed after ${sw.elapsedMilliseconds}ms', e);
+      throw AppError(
+        AppErrorKind.parsing,
+        'Server sent an invalid response.',
+        detail: e.message,
+      );
+    }
   }
 
   Future<MovieDetail?> vodInfo(Movie base, {CancelToken? cancel}) async {

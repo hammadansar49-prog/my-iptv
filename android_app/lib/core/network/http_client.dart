@@ -33,6 +33,13 @@ class HttpClient {
 
   /// GET a JSON document. Returns `null` for an empty/`null` body — the PC
   /// app treats that as "no rows", not as an error (AUDIT.md §2).
+  ///
+  /// For auth/categories/EPG only — small, fixed-shape responses. The three
+  /// catalogue endpoints that can run tens of megabytes (get_live_streams,
+  /// get_vod_streams, get_series) do NOT go through this: see
+  /// `XtreamApi._decodeAndMap` for why decoding *and* model-mapping have to
+  /// happen together in one background-isolate `compute()` call for those,
+  /// instead of handing back a giant raw decoded structure from here.
   Future<Object?> getJson(String url, {CancelToken? cancel}) async {
     final text = await getText(url, cancel: cancel);
     final trimmed = text.trim();

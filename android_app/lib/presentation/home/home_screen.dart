@@ -112,9 +112,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       seriesAsync.valueOrNull ?? const [],
       channelsAsync.valueOrNull ?? const [],
     );
-    final isLoading = moviesAsync.isLoading ||
-        seriesAsync.isLoading ||
-        channelsAsync.isLoading;
+    // Scoped to what the active filter actually shows — Movies/Series/Live
+    // are three independent fetches (movies alone can be tens of MB and
+    // take several seconds), and there is no reason a Movies tab that is
+    // already back should keep spinning just because Series or Live hasn't
+    // answered yet. "All" mixes movies+series (see _featured below) but
+    // never channels, so it does not wait on Live either.
+    final isLoading = switch (_filter) {
+      HomeFilter.movies || HomeFilter.ott => moviesAsync.isLoading,
+      HomeFilter.series => seriesAsync.isLoading,
+      HomeFilter.liveTv => channelsAsync.isLoading,
+      HomeFilter.all => moviesAsync.isLoading || seriesAsync.isLoading,
+    };
     _itemCount = featured.length;
     final backdropUrl = featured.isEmpty
         ? null
