@@ -15,6 +15,15 @@ abstract final class Routes {
   /// Saved Xtream accounts + switcher.
   static const accounts = '/accounts';
   static const license = '/license';
+
+  /// User-added sources (Single Channel / M3U Playlist). Independent of the
+  /// Xtream session. `customChannelEdit`'s `extra` is the channel to edit
+  /// (none = add); `customPlaylist`'s `extra` is the playlist id.
+  static const customChannels = '/custom/channels';
+  static const customChannelEdit = '/custom/channels/edit';
+  static const customPlaylists = '/custom/playlists';
+  static const customPlaylistAdd = '/custom/playlists/add';
+  static const customPlaylist = '/custom/playlists/view';
   static const plans = '/plans';
 
   /// Shell with the floating bottom bar: Home / EPG / Downloads / Profile.

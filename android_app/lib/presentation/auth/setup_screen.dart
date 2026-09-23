@@ -14,12 +14,10 @@ import 'widgets/hero_tv_banner.dart';
 /// banner, a "Choose Xtreaming" pill, two side-by-side source cards, then a
 /// full-width Xtream List card that leads into the real login form.
 ///
-/// Xtream Codes is the only authentication this backend actually has
-/// (AUDIT.md §2), so Playlist and Single Channel are rendered in the
-/// reference's positions but marked unavailable and are not tappable into a
-/// dead end. They are shown rather than hidden because the reference layout
-/// was requested specifically, and a visible "not supported yet" is honest —
-/// whereas a card that opens a broken flow would not be.
+/// Playlist and Single Channel open the user-added sources
+/// (`presentation/custom_sources/`), which are independent of the Xtream
+/// session: they play through the same player but never touch the Xtream
+/// catalogue or login.
 class SetupScreen extends ConsumerStatefulWidget {
   const SetupScreen({super.key});
 
@@ -35,16 +33,6 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(authControllerProvider.notifier).loadSavedAccounts();
     });
-  }
-
-  void _notSupported(String what) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('$what is not supported yet — use Xtream List.'),
-        ),
-      );
   }
 
   @override
@@ -108,8 +96,8 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                       title: 'Playlist',
                       description: 'Explore your all playlist channels',
                       icon: Icons.subscriptions_rounded,
-                      enabled: false,
-                      onTap: () => _notSupported('M3U playlist'),
+                      enabled: true,
+                      onTap: () => context.push(Routes.customPlaylists),
                     ),
                   ),
                   const SizedBox(width: Insets.md),
@@ -118,8 +106,8 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                       title: 'Single Channel',
                       description: 'Play channel with streaming link',
                       icon: Icons.podcasts_rounded,
-                      enabled: false,
-                      onTap: () => _notSupported('Single channel'),
+                      enabled: true,
+                      onTap: () => context.push(Routes.customChannels),
                     ),
                   ),
                 ],

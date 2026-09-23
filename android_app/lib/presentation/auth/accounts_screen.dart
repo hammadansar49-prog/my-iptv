@@ -17,9 +17,9 @@ import 'auth_controller.dart';
 /// the UI over what the auth repository could already do — no storage
 /// migration was needed.
 ///
-/// The M3u Playlist and Single Channel tabs exist because the reference
-/// layout was requested, but they are visibly disabled: Xtream Codes is the
-/// only authentication this backend has (AUDIT.md §2).
+/// The M3u Playlist and Single Channel tabs lead to the user-added sources
+/// screens (`presentation/custom_sources/`); this screen itself only lists
+/// Xtream accounts.
 class AccountsScreen extends ConsumerStatefulWidget {
   const AccountsScreen({super.key});
 
@@ -96,14 +96,6 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
     }
   }
 
-  void _notSupported(String what) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text('$what is not supported yet.')),
-      );
-  }
-
   @override
   Widget build(BuildContext context) {
     final accounts = ref.watch(authControllerProvider).savedAccounts;
@@ -137,13 +129,13 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
                 _Tab(
                   label: 'M3u Playlist',
                   selected: false,
-                  onTap: () => _notSupported('M3U playlist'),
+                  onTap: () => context.push(Routes.customPlaylists),
                 ),
                 const SizedBox(width: Insets.md),
                 _Tab(
                   label: 'Single Channel',
                   selected: false,
-                  onTap: () => _notSupported('Single channel'),
+                  onTap: () => context.push(Routes.customChannels),
                 ),
               ],
             ),

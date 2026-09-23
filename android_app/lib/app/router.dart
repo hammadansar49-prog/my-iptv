@@ -7,6 +7,12 @@ import '../presentation/auth/accounts_screen.dart';
 import '../presentation/auth/login_screen.dart';
 import '../presentation/auth/setup_screen.dart';
 import '../presentation/auth/splash_screen.dart';
+import '../presentation/custom_sources/channel_edit_screen.dart';
+import '../presentation/custom_sources/custom_models.dart';
+import '../presentation/custom_sources/my_channels_screen.dart';
+import '../presentation/custom_sources/playlist_add_screen.dart';
+import '../presentation/custom_sources/playlist_screen.dart';
+import '../presentation/custom_sources/playlists_screen.dart';
 import '../presentation/favorites/favorites_screen.dart';
 import '../presentation/live_tv/live_tv_screen.dart';
 import '../presentation/license/license_screen.dart';
@@ -67,6 +73,32 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: Routes.accounts,
         builder: (context, state) => const AccountsScreen(),
+      ),
+      GoRoute(
+        path: Routes.customChannels,
+        builder: (context, state) => const MyChannelsScreen(),
+      ),
+      GoRoute(
+        path: Routes.customChannelEdit,
+        builder: (context, state) => ChannelEditScreen(
+          existing:
+              state.extra is CustomChannel ? state.extra as CustomChannel : null,
+        ),
+      ),
+      GoRoute(
+        path: Routes.customPlaylists,
+        builder: (context, state) => const PlaylistsScreen(),
+      ),
+      GoRoute(
+        path: Routes.customPlaylistAdd,
+        builder: (context, state) => const PlaylistAddScreen(),
+      ),
+      GoRoute(
+        path: Routes.customPlaylist,
+        // Without an id (e.g. a cold restore) fall back to the list.
+        builder: (context, state) => state.extra is String
+            ? PlaylistScreen(playlistId: state.extra as String)
+            : const PlaylistsScreen(),
       ),
       GoRoute(
         path: Routes.home,
