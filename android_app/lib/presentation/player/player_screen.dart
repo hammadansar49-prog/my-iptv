@@ -520,7 +520,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
               if (_aspectShown > 0)
                 IgnorePointer(
-                  child: Center(
+                  // Above centre: the middle of the screen is where the
+                  // Play/Pause and ±10 buttons sit, which covered the badge.
+                  child: Align(
+                    alignment: const Alignment(0, -0.45),
                     child: _AspectBadge(
                       key: ValueKey(_aspectShown),
                       label: _aspect.label,
