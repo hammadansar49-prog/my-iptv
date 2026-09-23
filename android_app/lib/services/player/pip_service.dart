@@ -38,6 +38,15 @@ abstract final class PipService {
     });
   }
 
+  /// Asks the OS directly whether a PiP window is showing now.
+  static Future<bool> isInPipNow() async {
+    try {
+      return await _channel.invokeMethod<bool>('isInPip') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<bool> isSupported() async {
     if (!Platform.isAndroid) return false;
     _ensureListening();

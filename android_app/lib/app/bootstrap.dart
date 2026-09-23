@@ -10,6 +10,7 @@ import '../core/security/device_identity.dart';
 import '../core/storage/local_store.dart';
 import '../core/theme/app_theme.dart';
 import '../core/utils/logger.dart';
+import '../services/player/background_playback_guard.dart';
 import '../services/notifications/announcement_push.dart';
 import '../presentation/providers.dart';
 
@@ -54,6 +55,7 @@ class Bootstrap {
     // fullscreen and restore this on exit (spec §53).
     await AppOrientation.restore(isTv: isTv);
 
+    BackgroundPlaybackGuard.install();
     Log.i(_tag, 'ready (tv=$isTv)');
     return Bootstrap(localStore: store, isTv: isTv);
   }

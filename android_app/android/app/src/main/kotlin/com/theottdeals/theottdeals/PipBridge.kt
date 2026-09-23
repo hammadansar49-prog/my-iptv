@@ -39,6 +39,13 @@ object PipBridge {
             try {
                 when (call.method) {
                     "isSupported" -> result.success(supported())
+                    // Ground truth for "is the video really in a PiP window
+                    // right now" — the mode-changed callback is not
+                    // delivered reliably on every OEM build.
+                    "isInPip" -> result.success(
+                        android.os.Build.VERSION.SDK_INT >= 24 &&
+                            activity?.isInPictureInPictureMode == true
+                    )
                     "configure" -> {
                         autoEnter = call.argument<Boolean>("autoEnter") ?: false
                         call.argument<Double>("aspect")?.let { aspect = rational(it) }

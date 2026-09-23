@@ -91,6 +91,19 @@ class PlayerController extends ChangeNotifier {
   /// EPG tab, which the shell's IndexedStack never disposes.
   static Future<void> stopActive() async => _active?.stop();
 
+  /// The app went to the background without a PiP window. VOD pauses (so
+  /// it resumes in place); live stops outright, releasing the account's
+  /// single provider connection.
+  static Future<void> backgroundActive() async {
+    final c = _active;
+    if (c == null || c._disposed) return;
+    if (c._state.isLive) {
+      await c.stop();
+    } else {
+      await c.pause();
+    }
+  }
+
   final ConnectionGuard _guard;
 
   Player? _player;
