@@ -19,6 +19,8 @@ import '../settings/settings_controller.dart';
 import '../../data/models/content.dart';
 import '../../data/models/library.dart';
 import '../providers.dart';
+import '../../services/download/download_manager.dart';
+import '../widgets/download_button.dart';
 import 'autoplay.dart';
 import 'player_controls.dart';
 import 'seek_feedback.dart';
@@ -610,6 +612,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                       : () => _playRequest(_previous!),
                   onNext:
                       _upNext == null ? null : () => _playRequest(_upNext!),
+                  download: widget.request.isLive
+                      ? null
+                      : DownloadButton(
+                          url: widget.request.url,
+                          diameter: 44,
+                          background: Colors.black.withValues(alpha: 0.45),
+                          buildRequest: () => DownloadRequest(
+                            url: widget.request.url,
+                            title: widget.request.title,
+                            subtitle: widget.request.subtitle,
+                            ext: widget.request.replay?.ext ?? 'mp4',
+                            thumb: widget.request.thumb,
+                            isEpisode: widget.request.section ==
+                                ContentSection.series,
+                          ),
+                        ),
                 ),
             ],
           ),

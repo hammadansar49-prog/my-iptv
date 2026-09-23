@@ -68,6 +68,19 @@ class DownloadButton extends ConsumerWidget {
       switch (phase) {
         case _Phase.idle:
           await manager.add(buildRequest());
+          final guard = ref.read(connectionGuardProvider);
+          // On a one-connection account the provider refuses a second
+          // socket while something plays, so the download waits for the
+          // player to close rather than failing — say so up front.
+          final waits = guard.hasPlayback && !guard.allowConcurrentDownloads;
+          messenger
+            ..hideCurrentSnackBar()
+            ..showSnackBar(SnackBar(
+              content: Text(waits
+                  ? 'Added to downloads — starts when playback stops '
+                      '(your account allows 1 connection)'
+                  : 'Download started'),
+            ));
         case _Phase.pending || _Phase.running || _Phase.paused:
           await manager.remove(item!.id);
           messenger

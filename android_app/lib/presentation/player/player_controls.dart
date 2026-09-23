@@ -34,6 +34,7 @@ class PlayerControls extends StatelessWidget {
     this.onEpisodes,
     this.onPrevious,
     this.onNext,
+    this.download,
   });
 
   final PlayerController player;
@@ -56,6 +57,9 @@ class PlayerControls extends StatelessWidget {
   final VoidCallback? onEpisodes;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
+
+  /// Download control for the current title (VOD only).
+  final Widget? download;
 
   static String formatTime(Duration d) {
     final h = d.inHours.toString().padLeft(2, '0');
@@ -108,6 +112,10 @@ class PlayerControls extends StatelessWidget {
                   RoundPlayerButton(
                       icon: Icons.arrow_back_rounded, onTap: onBack),
                   const Spacer(),
+                  if (download != null) ...[
+                    download!,
+                    const SizedBox(width: Insets.sm),
+                  ],
                   PlayerPill(
                     label: 'VLC',
                     icon: Icons.swap_horiz_rounded,
