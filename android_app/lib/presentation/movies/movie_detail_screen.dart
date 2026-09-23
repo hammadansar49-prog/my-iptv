@@ -12,6 +12,7 @@ import '../../services/player/playback_request.dart';
 import '../home/home_feed.dart';
 import '../providers.dart';
 import '../widgets/download_button.dart';
+import '../widgets/watch_state.dart';
 import '../widgets/favorite_heart_button.dart';
 import '../widgets/network_artwork.dart';
 
@@ -169,6 +170,10 @@ class MovieDetailScreen extends ConsumerWidget {
                         ),
                       ],
 
+                      if (history != null && history.isWatched) ...[
+                        const SizedBox(height: Insets.md),
+                        const WatchedMark(),
+                      ],
                       const SizedBox(height: Insets.lg),
                       SizedBox(
                         width: double.infinity,

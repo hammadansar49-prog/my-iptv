@@ -12,6 +12,7 @@ import '../../services/player/playback_request.dart';
 import '../providers.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/download_button.dart';
+import '../widgets/watch_state.dart';
 import '../widgets/favorite_heart_button.dart';
 import '../widgets/network_artwork.dart';
 
@@ -493,6 +494,21 @@ class _EpisodeRow extends ConsumerWidget {
                     ],
                   ),
                 ),
+                if (history != null && history.isContinueWatching)
+                  Padding(
+                    padding: const EdgeInsets.only(right: Insets.sm),
+                    child: ResumePill(
+                      onTap: () => context.push(
+                        Routes.player,
+                        extra: request.copyWith(startAt: history.resumeAt),
+                      ),
+                    ),
+                  )
+                else if (history != null && history.isWatched)
+                  const Padding(
+                    padding: EdgeInsets.only(right: Insets.sm),
+                    child: WatchedMark(),
+                  ),
                 DownloadButton(
                   url: repo.episodeUrl(episode),
                   background: AppColors.surfaceHigh,

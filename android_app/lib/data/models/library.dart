@@ -126,6 +126,14 @@ class HistoryEntry {
       resumeAt.inMilliseconds <
           duration.inMilliseconds * Playback.resumeMaxFraction;
 
+  /// Played to (nearly) the end — past the point where resuming stops
+  /// making sense. Drives the "WATCHED" mark on episodes and movies.
+  bool get isWatched =>
+      !isLive &&
+      duration > Duration.zero &&
+      resumeAt.inMilliseconds >=
+          duration.inMilliseconds * Playback.resumeMaxFraction;
+
   double get progress {
     if (duration <= Duration.zero) return 0;
     final p = resumeAt.inMilliseconds / duration.inMilliseconds;
