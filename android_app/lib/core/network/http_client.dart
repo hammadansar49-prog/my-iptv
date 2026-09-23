@@ -51,9 +51,13 @@ class HttpClient {
   }
 
   Future<String> getText(String url, {CancelToken? cancel}) async {
+    final sw = Stopwatch()..start();
+    Log.i('HttpClient', '-> GET ${Log.redact(url)}');
     try {
       final res = await _dio.get<String>(url, cancelToken: cancel);
       final status = res.statusCode ?? 0;
+      Log.i('HttpClient',
+          '<- $status (${sw.elapsedMilliseconds}ms, ${res.data?.length ?? 0} bytes) ${Log.redact(url)}');
       if (status < 200 || status >= 300) {
         throw AppError(
           status == 401 || status == 403
@@ -71,9 +75,13 @@ class HttpClient {
         throw const AppError(AppErrorKind.server, 'The server sent too much data.');
       }
       return body;
-    } on AppError {
+    } on AppError catch (e) {
+      Log.e('HttpClient',
+          'AppError after ${sw.elapsedMilliseconds}ms for ${Log.redact(url)}: ${e.kind} ${e.message}');
       rethrow;
     } on DioException catch (e) {
+      Log.e('HttpClient',
+          'DioException(${e.type}) after ${sw.elapsedMilliseconds}ms for ${Log.redact(url)}: ${e.message}');
       if (CancelToken.isCancel(e)) rethrow;
       switch (e.type) {
         case DioExceptionType.connectionTimeout:
@@ -92,6 +100,11 @@ class HttpClient {
             retryable: true,
           );
       }
+    } catch (e, st) {
+      Log.e('HttpClient',
+          'Unexpected ${e.runtimeType} after ${sw.elapsedMilliseconds}ms for ${Log.redact(url)}: $e',
+          e, st);
+      rethrow;
     }
   }
 

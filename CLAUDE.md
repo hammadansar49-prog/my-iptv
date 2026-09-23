@@ -81,6 +81,15 @@ slow/unstable connection.
 - Same live-channel auto-retry logic as the PC app (3 retries with backoff, ~12s stall timeout)
   is duplicated in both `player_screen.dart` and `live_tv_screen.dart` — keep them in sync if one
   changes.
+- **Impeller is disabled** (`android:name="io.flutter.embedding.android.EnableImpeller"
+  value="false"` in `android/app/src/main/AndroidManifest.xml`). On a real Oppo/ColorOS Android 14
+  handset the app launched to a permanent black screen — no crash, no error, `adb logcat` showing
+  the engine boot fine but then `FlutterRenderer: Width is zero. 0,0` repeatedly and both the
+  Vulkan *and* GLES Impeller backends logging their own init (a fallback that itself never
+  recovered). Skia (Impeller off) renders correctly on the same device. This is the same class of
+  problem as the `hwdec: 'no'` note above — a rendering backend that is fine on an emulator/some
+  devices and silently broken on a real one — so don't re-enable Impeller without testing on real
+  hardware (ideally more than one device/GPU) first.
 
 ## License key system (gate screen in the PC app, backed by theottdeals' own Firebase)
 

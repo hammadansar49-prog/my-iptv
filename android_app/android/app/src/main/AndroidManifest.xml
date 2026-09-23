@@ -29,6 +29,21 @@
              custom port (the design reference shows http://otv.to). Spec 51
              asks for HTTPS "where supported"; refusing http outright would
              make the app unable to talk to most providers. -->
+
+        <!-- Impeller (Flutter's Vulkan/GLES renderer, on by default) produces
+             a permanent black screen on some real Android 14 devices with
+             quirky GPU drivers (observed on an Oppo/ColorOS handset: engine
+             logs show it initialising BOTH the Vulkan and GLES Impeller
+             backends and repeatedly reporting "Width is zero. 0,0" for the
+             render surface — nothing ever paints, no crash, no error). The
+             older Skia backend does not have this problem on that hardware.
+             Do not remove this without confirming Impeller actually renders
+             on real (not just emulator) hardware first — see CLAUDE.md's
+             media_kit hwdec note for the same kind of "works on emulator,
+             black/broken on a real device" GPU issue. -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

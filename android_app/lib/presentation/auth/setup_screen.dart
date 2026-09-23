@@ -88,29 +88,42 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             ),
             const SizedBox(height: Insets.xl),
 
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: _SourceCard(
-                    title: 'Playlist',
-                    description: 'Explore your all playlist channels',
-                    icon: Icons.subscriptions_rounded,
-                    enabled: false,
-                    onTap: () => _notSupported('M3U playlist'),
+            // IntrinsicHeight, not a bare `Row(crossAxisAlignment: stretch)`:
+            // this Row lives inside a ListView, which hands it unbounded
+            // height. `stretch` on its own asks children to fill that
+            // unbounded height ("BoxConstraints forces an infinite height"),
+            // which crashed layout every frame and left the whole screen
+            // permanently black on first run (no saved account -> this is
+            // the first screen shown) — no exception overlay, no error
+            // shown, just nothing ever rendering. IntrinsicHeight measures
+            // the two cards' natural height first and gives stretch a real
+            // number to work with, so both cards still end up the same
+            // height without asking for infinity.
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _SourceCard(
+                      title: 'Playlist',
+                      description: 'Explore your all playlist channels',
+                      icon: Icons.subscriptions_rounded,
+                      enabled: false,
+                      onTap: () => _notSupported('M3U playlist'),
+                    ),
                   ),
-                ),
-                const SizedBox(width: Insets.md),
-                Expanded(
-                  child: _SourceCard(
-                    title: 'Single Channel',
-                    description: 'Play channel with streaming link',
-                    icon: Icons.podcasts_rounded,
-                    enabled: false,
-                    onTap: () => _notSupported('Single channel'),
+                  const SizedBox(width: Insets.md),
+                  Expanded(
+                    child: _SourceCard(
+                      title: 'Single Channel',
+                      description: 'Play channel with streaming link',
+                      icon: Icons.podcasts_rounded,
+                      enabled: false,
+                      onTap: () => _notSupported('Single channel'),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: Insets.md),
 
