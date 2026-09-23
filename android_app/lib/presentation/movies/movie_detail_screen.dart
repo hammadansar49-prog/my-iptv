@@ -9,6 +9,7 @@ import '../../data/models/content.dart';
 import '../../data/models/library.dart';
 import '../../services/download/download_manager.dart';
 import '../../services/player/playback_request.dart';
+import '../home/home_feed.dart';
 import '../providers.dart';
 import '../widgets/download_button.dart';
 import '../widgets/network_artwork.dart';
@@ -30,9 +31,26 @@ class MovieDetailScreen extends ConsumerWidget {
 
     // "More movies" strip under the details — the same catalogue already
     // loaded for Home/Movies, just with this title itself left out.
-    final more = (ref.watch(moviesProvider('')).valueOrNull ?? const <Movie>[])
-        .where((m) => m.key != movie.key)
-        .toList();
+    // Suggestions: the same category's newest real titles (ContentFilter
+    // drops dated event recordings, wrestling shows, missing/recycled
+    // posters), topped up from the newest titles overall. It used to be the
+    // entire 69k catalogue in panel order, junk first.
+    final index = ref.watch(movieIndexProvider).valueOrNull;
+    final more = <Movie>[];
+    if (index != null) {
+      final seen = <String>{movie.key};
+      void add(Iterable<Movie> from) {
+        for (final m in from) {
+          if (more.length >= _suggestions) return;
+          if (seen.add(m.key)) more.add(m);
+        }
+      }
+
+      for (final b in index.buckets) {
+        if (b.category.id == movie.categoryId) add(b.items);
+      }
+      add(index.newest);
+    }
 
     ref.watch(libraryRevisionProvider);
     final library = ref.read(libraryRepositoryProvider);
@@ -379,3 +397,6 @@ class _Action extends StatelessWidget {
     );
   }
 }
+
+/// How many titles the "More Movies" grid suggests.
+const _suggestions = 30;

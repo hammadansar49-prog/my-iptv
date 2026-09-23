@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/models/content.dart';
 import '../providers.dart';
+import 'content_filter.dart';
 
 /// Which kind of content the home feed is showing.
 enum HomeFilter { all, movies, series, liveTv, ott }
@@ -80,11 +81,15 @@ SectionIndex<T> _buildIndex<T>({
   required String Function(T) categoryOf,
   Int32List? order,
   Int64List? keys,
+  bool Function(T)? keep,
 }) {
   final counts = <String, int>{};
   final heads = <String, List<T>>{};
 
   void visit(T item) {
+    // Home recommends; it only shows what passes ContentFilter. Search and
+    // the full category screens still list everything.
+    if (keep != null && !keep(item)) return;
     final id = categoryOf(item);
     counts[id] = (counts[id] ?? 0) + 1;
     final head = heads[id] ??= <T>[];
@@ -117,6 +122,7 @@ SectionIndex<T> _buildIndex<T>({
       // Undated rows sort last; stopping there keeps "Recently Added"
       // honest on a panel that sends no dates at all.
       if (keys[i] < 0 || newest.length == HomeLimits.ranked) break;
+      if (keep != null && !keep(items[i])) continue;
       newest.add(items[i]);
     }
   }
@@ -137,6 +143,7 @@ final movieIndexProvider = FutureProvider<SectionIndex<Movie>>((ref) async {
   // registered after an async gap.
   final categoriesF = _categoriesOrEmpty(ref, ContentSection.movies);
   final movies = await ref.watch(moviesProvider('').future);
+  final filter = await ref.watch(movieFilterProvider.future);
   final categories = await categoriesF;
 
   final keys = Int64List(movies.length);
@@ -150,12 +157,14 @@ final movieIndexProvider = FutureProvider<SectionIndex<Movie>>((ref) async {
     categoryOf: (m) => m.categoryId,
     order: order,
     keys: keys,
+    keep: filter.keepMovie,
   );
 });
 
 final seriesIndexProvider = FutureProvider<SectionIndex<Series>>((ref) async {
   final categoriesF = _categoriesOrEmpty(ref, ContentSection.series);
   final series = await ref.watch(seriesProvider('').future);
+  final filter = await ref.watch(seriesFilterProvider.future);
   final categories = await categoriesF;
 
   final keys = Int64List(series.length);
@@ -169,6 +178,7 @@ final seriesIndexProvider = FutureProvider<SectionIndex<Series>>((ref) async {
     categoryOf: (s) => s.categoryId,
     order: order,
     keys: keys,
+    keep: filter.keepSeries,
   );
 });
 
@@ -378,8 +388,13 @@ final homeFeaturedProvider =
     Provider.family<AsyncValue<List<FeaturedItem>>, HomeFilter>((ref, filter) {
   List<FeaturedItem> newestMovies(SectionIndex<Movie> m, int n) =>
       [for (final x in m.newest.take(n)) FeaturedItem.movie(x)];
-  List<FeaturedItem> firstSeries(List<Series> s, int n) =>
-      [for (final x in s.take(n)) FeaturedItem.series(x)];
+  List<FeaturedItem> firstSeries(SectionIndex<Series> s, int n) => [
+        for (final x in (s.newest.isNotEmpty
+                ? s.newest
+                : [for (final b in s.buckets) ...b.items])
+            .take(n))
+          FeaturedItem.series(x),
+      ];
 
   switch (filter) {
     case HomeFilter.movies:
@@ -389,7 +404,7 @@ final homeFeaturedProvider =
           .whenData((m) => newestMovies(m, HomeLimits.featured));
     case HomeFilter.series:
       return ref
-          .watch(seriesProvider(''))
+          .watch(seriesIndexProvider)
           .whenData((s) => firstSeries(s, HomeLimits.featured));
     case HomeFilter.liveTv:
       return ref.watch(liveChannelsProvider('')).whenData((c) => [
@@ -399,8 +414,8 @@ final homeFeaturedProvider =
       const half = HomeLimits.featured ~/ 2;
       return _both(
         ref.watch(movieIndexProvider),
-        ref.watch(seriesProvider('')),
-        (SectionIndex<Movie> m, List<Series> s) =>
+        ref.watch(seriesIndexProvider),
+        (SectionIndex<Movie> m, SectionIndex<Series> s) =>
             [...newestMovies(m, half), ...firstSeries(s, half)],
       );
   }
