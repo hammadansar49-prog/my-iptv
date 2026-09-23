@@ -489,9 +489,31 @@ class PlayerController extends ChangeNotifier {
   Future<void> setVolume(double volume) async =>
       _player?.setVolume(volume.clamp(0, 100));
 
-  List<AudioTrack> get audioTracks => _player?.state.tracks.audio ?? const [];
+  /// Real tracks only. libmpv also lists the pseudo-tracks "auto" and "no";
+  /// the tracks dialog offers "no" as its own Disable row.
+  static bool _real(String id) => id != 'auto' && id != 'no';
+
+  List<VideoTrack> get videoTracks =>
+      (_player?.state.tracks.video ?? const <VideoTrack>[])
+          .where((t) => _real(t.id))
+          .toList();
+
+  /// The currently selected tracks (ids "no" when disabled).
+  VideoTrack? get currentVideoTrack => _player?.state.track.video;
+  AudioTrack? get currentAudioTrack => _player?.state.track.audio;
+  SubtitleTrack? get currentSubtitleTrack => _player?.state.track.subtitle;
+
+  Future<void> setVideoTrack(VideoTrack track) async =>
+      _player?.setVideoTrack(track);
+
+  List<AudioTrack> get audioTracks =>
+      (_player?.state.tracks.audio ?? const <AudioTrack>[])
+          .where((t) => _real(t.id))
+          .toList();
   List<SubtitleTrack> get subtitleTracks =>
-      _player?.state.tracks.subtitle ?? const [];
+      (_player?.state.tracks.subtitle ?? const <SubtitleTrack>[])
+          .where((t) => _real(t.id))
+          .toList();
 
   Future<void> setAudioTrack(AudioTrack track) async =>
       _player?.setAudioTrack(track);

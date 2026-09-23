@@ -20,6 +20,7 @@ import '../../data/models/content.dart';
 import '../../data/models/library.dart';
 import '../../data/repositories/library_repository_impl.dart';
 import '../providers.dart';
+import 'tracks_dialog.dart';
 import '../../services/download/download_manager.dart';
 import '../widgets/download_button.dart';
 import 'autoplay.dart';
@@ -324,59 +325,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     );
   }
 
-  Future<void> _showTracksSheet() async {
-    final audio = _player.audioTracks;
-    final subtitles = _player.subtitleTracks;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.surfaceHigh,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(Insets.lg),
-              child: Text(
-                'Audio',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-            ),
-            if (audio.isEmpty)
-              const ListTile(title: Text('No audio tracks reported'))
-            else
-              for (final track in audio)
-                ListTile(
-                  title: Text(track.title ?? track.language ?? track.id),
-                  onTap: () {
-                    _player.setAudioTrack(track);
-                    Navigator.of(context).pop();
-                  },
-                ),
-            const Divider(),
-            const Padding(
-              padding: EdgeInsets.all(Insets.lg),
-              child: Text(
-                'Subtitles',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-            ),
-            if (subtitles.isEmpty)
-              const ListTile(title: Text('No subtitle tracks reported'))
-            else
-              for (final track in subtitles)
-                ListTile(
-                  title: Text(track.title ?? track.language ?? track.id),
-                  onTap: () {
-                    _player.setSubtitleTrack(track);
-                    Navigator.of(context).pop();
-                  },
-                ),
-          ],
-        ),
-      ),
-    );
-  }
+  Future<void> _showTracksSheet() => showTracksDialog(context, _player);
 
   /// Resolve the previous/next episode so the skip buttons are live during
   /// playback, not only once an episode ends.
