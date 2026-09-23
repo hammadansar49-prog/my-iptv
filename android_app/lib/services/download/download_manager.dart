@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/constants/app_constants.dart' as consts;
@@ -10,6 +13,7 @@ import '../../core/network/connection_guard.dart';
 import '../../core/storage/local_store.dart';
 import '../../core/utils/logger.dart';
 import '../../data/models/library.dart';
+import 'download_service_bridge.dart';
 
 /// Metadata for a new download request.
 class DownloadRequest {
@@ -34,6 +38,13 @@ class DownloadRequest {
   final String seasonEpisodeTag;
 }
 
+/// Thrown inside the transfer loop when the stall watchdog fires.
+class _StallException implements Exception {
+  const _StallException();
+  @override
+  String toString() => 'no data for 30 seconds';
+}
+
 /// Port of `downloads.js`.
 ///
 /// The rules that matter, all from AUDIT.md §5:
@@ -43,33 +54,60 @@ class DownloadRequest {
 ///    `Range: bytes=<have>-`. A server that ignores Range (answers 200)
 ///    restarts the file rather than corrupting it.
 ///  * A fixed retryable-status set, exponential backoff capped at 15s, and
-///    at most 10 retries before the item fails.
+///    at most 10 retries before the item fails. The counter resets whenever
+///    an attempt actually moved bytes, so a long download over a flaky link
+///    never fails just because it dropped 11 times in an hour.
 ///  * The progress ticker stops itself when nothing is active — spec §47
 ///    is explicit about not leaving timers running.
+///
+/// Throughput: the hot loop does nothing per chunk except copy into a 1 MiB
+/// buffer; disk writes are 1 MiB `RandomAccessFile.writeFrom` calls, and
+/// progress/UI/notification updates happen on the 1 s ticker only.
 class DownloadManager {
   DownloadManager({
     required LocalStore store,
     required ConnectionGuard guard,
     Dio? dio,
+    DownloadServiceBridge? service,
   })  : _store = store,
         _guard = guard,
-        _dio = dio ?? Dio() {
+        _dio = dio ?? _makeDio(),
+        _service = service ?? DownloadServiceBridge() {
     _items = _store
         .readList(_kItems)
         .map(DownloadItem.fromJson)
         .toList();
+    _service.onAction = _onNotificationAction;
+  }
+
+  static Dio _makeDio() {
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 20),
+      receiveTimeout: consts.Downloads.socketTimeout,
+    ));
+    dio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () => HttpClient()
+        ..autoUncompress = false
+        ..idleTimeout = const Duration(seconds: 5)
+        ..connectionTimeout = const Duration(seconds: 20),
+    );
+    return dio;
   }
 
   static const _tag = 'DownloadManager';
   static const _kItems = 'downloads';
   static const _kDir = 'downloads_dir';
+  static const _bufferSize = 1 << 20; // 1 MiB disk writes
+  static const _stallAfter = Duration(seconds: 30);
 
   final LocalStore _store;
   final ConnectionGuard _guard;
   final Dio _dio;
+  final DownloadServiceBridge _service;
 
   late List<DownloadItem> _items;
   String? _rootDir;
+  bool _inited = false;
 
   final _changes = StreamController<List<DownloadItem>>.broadcast();
   Stream<List<DownloadItem>> get changes => _changes.stream;
@@ -79,12 +117,27 @@ class DownloadManager {
   // Active transfer state.
   String? _activeId;
   CancelToken? _cancelToken;
-  IOSink? _sink;
   ProviderLease? _lease;
   int _retries = 0;
   Timer? _retryTimer;
   Timer? _ticker;
   bool _disposed = false;
+
+  /// Live byte count of the running transfer; folded into the item on the
+  /// ticker, never per chunk.
+  int _liveBytes = -1;
+  DateTime _lastByteAt = DateTime.now();
+  bool _stalled = false;
+
+  /// The item the notification is about; kept while it is paused so the
+  /// notification can offer "Resume".
+  String? _notifId;
+
+  // Connectivity.
+  StreamSubscription<List<ConnectivityResult>>? _netSub;
+  bool _online = true;
+  /// Items that failed on a network error — requeued when the network returns.
+  final Set<String> _netFailed = {};
 
   /// Smoothed bytes/sec per item id.
   final Map<String, double> _speeds = {};
@@ -100,6 +153,8 @@ class DownloadManager {
   }
 
   Future<void> init() async {
+    if (_inited) return;
+    _inited = true;
     final saved = _store.read<String>(_kDir);
     if (saved != null && saved.isNotEmpty) {
       _rootDir = saved;
@@ -108,6 +163,11 @@ class DownloadManager {
       _rootDir = '${dir.path}${Platform.pathSeparator}Downloads';
     }
     await Directory(_rootDir!).create(recursive: true);
+    try {
+      _netSub = Connectivity().onConnectivityChanged.listen(_onConnectivity);
+    } catch (e) {
+      Log.w(_tag, 'connectivity unavailable: $e');
+    }
     // Anything left mid-flight by a kill is already normalised to `queued`
     // by DownloadItem.toJson; start whatever is waiting.
     unawaited(Future.delayed(const Duration(seconds: 3), _pump));
@@ -115,9 +175,46 @@ class DownloadManager {
 
   String get rootDir => _rootDir ?? '';
 
+  void _onConnectivity(List<ConnectivityResult> results) {
+    final online = results.any((r) => r != ConnectivityResult.none);
+    final cameBack = online && !_online;
+    _online = online;
+    if (!cameBack || _disposed) return;
+    Log.i(_tag, 'network back — resuming downloads');
+    for (final id in _netFailed.toList()) {
+      final it = _find(id);
+      if (it != null && it.status == DownloadStatus.failed) {
+        _update(id, (x) => x.copyWith(status: DownloadStatus.queued, error: ''));
+      }
+    }
+    _netFailed.clear();
+    // An active item sitting in backoff retries right now.
+    final id = _activeId;
+    if (id != null && _retryTimer != null && _cancelToken == null) {
+      _retryTimer?.cancel();
+      _retryTimer = null;
+      unawaited(_attempt(id));
+    }
+    unawaited(_pump());
+  }
+
+  // ---- Notification actions ------------------------------------------------
+
+  void _onNotificationAction(String action, String id) {
+    switch (action) {
+      case 'pause':
+        unawaited(pause(id));
+      case 'resume':
+        unawaited(resume(id));
+      case 'cancel':
+        unawaited(remove(id));
+    }
+  }
+
   // ---- Queue operations ---------------------------------------------------
 
   Future<DownloadItem> add(DownloadRequest request) async {
+    unawaited(_service.ensureNotificationPermission());
     final existing = _items.firstWhereOrNull(
       (it) => it.url == request.url && it.status != DownloadStatus.failed,
     );
@@ -155,6 +252,7 @@ class DownloadManager {
   Future<void> pause(String id) async {
     final item = _find(id);
     if (item == null || item.status == DownloadStatus.completed) return;
+    _netFailed.remove(id);
     if (_activeId == id) {
       await _stopActive(DownloadStatus.paused);
     } else {
@@ -170,6 +268,8 @@ class DownloadManager {
         item.status == DownloadStatus.downloading) {
       return;
     }
+    unawaited(_service.ensureNotificationPermission());
+    _netFailed.remove(id);
     _update(id, (it) => it.copyWith(status: DownloadStatus.queued, error: ''));
     unawaited(_pump());
   }
@@ -185,6 +285,8 @@ class DownloadManager {
     }
     _items.removeWhere((it) => it.id == id);
     _speeds.remove(id);
+    _netFailed.remove(id);
+    if (_notifId == id) _notifId = null;
     _persist();
     unawaited(_pump());
   }
@@ -209,7 +311,10 @@ class DownloadManager {
 
     final next = _items.firstWhereOrNull((it) => it.status == DownloadStatus.waiting) ??
         _items.lastWhereOrNull((it) => it.status == DownloadStatus.queued);
-    if (next == null) return;
+    if (next == null) {
+      _syncService();
+      return;
+    }
 
     final lease = _guard.tryAcquire(ProviderUse.download, label: next.title);
     if (lease == null) {
@@ -232,25 +337,34 @@ class DownloadManager {
 
     _lease = lease;
     _activeId = next.id;
+    _notifId = next.id;
     _retries = 0;
-    await _start(next);
+    _update(next.id, (it) => it.copyWith(
+          status: DownloadStatus.downloading,
+          error: '',
+        ));
+    _ensureTicker();
+    await _attempt(next.id);
   }
 
-  Future<void> _start(DownloadItem item) async {
-    // Resume from whatever is already on disk.
+  /// One attempt: resume from whatever `.part` holds right now.
+  Future<void> _attempt(String id) async {
+    if (_disposed || _activeId != id) return;
+    final item = _find(id);
+    if (item == null) return;
     var have = 0;
     try {
       final part = File(item.partPath);
       if (await part.exists()) have = await part.length();
     } catch (_) {}
-
-    _update(item.id, (it) => it.copyWith(
-          status: DownloadStatus.downloading,
-          receivedBytes: have,
-          error: '',
-        ));
-    _ensureTicker();
-    await _request(item.id, item.url, have, 0);
+    // A .part already holding the full size: finish instead of asking for
+    // an empty range.
+    if (item.totalBytes > 0 && have >= item.totalBytes) {
+      await _finish(id);
+      return;
+    }
+    _updateQuiet(id, (it) => it.copyWith(receivedBytes: have));
+    await _request(id, item.url, have, 0);
   }
 
   Future<void> _request(String id, String url, int from, int depth) async {
@@ -262,6 +376,10 @@ class DownloadManager {
 
     final cancel = CancelToken();
     _cancelToken = cancel;
+    _stalled = false;
+    _lastByteAt = DateTime.now();
+    var written = from;
+    RandomAccessFile? raf;
 
     try {
       final response = await _dio.get<ResponseBody>(
@@ -275,21 +393,27 @@ class DownloadManager {
           headers: {
             'User-Agent': consts.Api.downloadUserAgent,
             'Accept-Encoding': 'identity',
+            'Connection': 'keep-alive',
             if (from > 0) 'Range': 'bytes=$from-',
           },
         ),
       );
-      if (_disposed || _activeId != id) return;
+      if (_disposed || _activeId != id) {
+        cancel.cancel('stale');
+        return;
+      }
 
       final status = response.statusCode ?? 0;
 
       if (status >= 300 && status < 400) {
+        cancel.cancel('redirect');
         final location = response.headers.value('location');
         if (location == null) {
           await _fail(id, 'Bad redirect');
           return;
         }
         final next = Uri.parse(url).resolve(location).toString();
+        _cancelToken = null;
         await _request(id, next, from, depth + 1);
         return;
       }
@@ -298,14 +422,17 @@ class DownloadManager {
       if (item == null) return;
 
       // Already have the whole file.
-      if (status == 416 && from > 0 && item.totalBytes > 0 && from >= item.totalBytes) {
+      if (status == 416 && from > 0 && (item.totalBytes <= 0 || from >= item.totalBytes)) {
+        cancel.cancel('done');
         await _finish(id);
         return;
       }
 
       if (status != 200 && status != 206) {
+        cancel.cancel('bad status');
+        _cancelToken = null;
         if (consts.Downloads.retryableStatus.contains(status)) {
-          await _retry(id, url, 'HTTP $status');
+          await _retry(id, 'HTTP $status', progressed: false);
         } else {
           await _fail(id, 'Server answered HTTP $status');
         }
@@ -313,88 +440,140 @@ class DownloadManager {
       }
 
       // A 206 means our Range was honoured and we append. A 200 means the
-      // server ignored it, so the file starts over.
-      final appending = status == 206 && from > 0;
+      // server ignored it, so the file starts over (truncate).
+      var start = 0;
       var total = item.totalBytes;
       if (status == 206) {
         final range = response.headers.value('content-range') ?? '';
-        final match = RegExp(r'/(\d+)\s*$').firstMatch(range);
-        if (match != null) total = int.tryParse(match.group(1)!) ?? total;
+        final m = RegExp(r'bytes\s+(\d+)-\d*/(\d+|\*)').firstMatch(range);
+        if (m != null) {
+          start = int.tryParse(m.group(1)!) ?? from;
+          total = int.tryParse(m.group(2)!) ?? total;
+        } else {
+          start = from;
+        }
+        if (start > from) {
+          // Server skipped ahead of what we have — can't splice that.
+          Log.w(_tag, 'range start $start > have $from; restarting');
+          cancel.cancel('bad range');
+          _cancelToken = null;
+          await _deleteQuietly(item.partPath);
+          await _request(id, url, 0, depth + 1);
+          return;
+        }
       } else {
         final len = int.tryParse(response.headers.value('content-length') ?? '');
         if (len != null && len > 0) total = len;
+        if (from > 0) Log.i(_tag, 'server ignored Range; restarting "${item.title}"');
       }
-
-      final received = appending ? from : 0;
-      _update(id, (it) => it.copyWith(totalBytes: total, receivedBytes: received));
 
       final file = File(item.partPath);
       await file.parent.create(recursive: true);
-      final sink = file.openWrite(
-        mode: appending ? FileMode.append : FileMode.write,
-      );
-      _sink = sink;
-      _retries = 0;
+      raf = await file.open(mode: FileMode.append);
+      await raf.truncate(start);
+      await raf.setPosition(start);
+      written = start;
 
-      var written = received;
-      try {
-        await for (final chunk in response.data!.stream) {
-          if (_disposed || _activeId != id) break;
-          sink.add(chunk);
-          written += chunk.length;
-          _windowBytes += chunk.length;
-          _updateQuiet(id, (it) => it.copyWith(receivedBytes: written));
+      // Free-space check is not available from dart:io; rely on write errors.
+      _updateQuiet(id, (it) => it.copyWith(totalBytes: total, receivedBytes: written));
+      _liveBytes = written;
+      _emit();
+
+      final buffer = Uint8List(_bufferSize);
+      var fill = 0;
+      await for (final chunk in response.data!.stream) {
+        if (_disposed || _activeId != id || cancel.isCancelled) break;
+        var off = 0;
+        while (off < chunk.length) {
+          final n = min(chunk.length - off, _bufferSize - fill);
+          buffer.setRange(fill, fill + n, chunk, off);
+          fill += n;
+          off += n;
+          if (fill == _bufferSize) {
+            await raf.writeFrom(buffer, 0, fill);
+            fill = 0;
+          }
         }
-        await sink.flush();
-      } finally {
-        await sink.close();
-        if (_sink == sink) _sink = null;
+        written += chunk.length;
+        _liveBytes = written;
+        _windowBytes += chunk.length;
+        _lastByteAt = DateTime.now();
       }
+      if (fill > 0) await raf.writeFrom(buffer, 0, fill);
+      await raf.close();
+      raf = null;
 
-      if (_disposed || _activeId != id) return;
+      if (_stalled) throw const _StallException();
+      if (_disposed || _activeId != id || cancel.isCancelled) return;
+      _cancelToken = null;
+      _updateQuiet(id, (it) => it.copyWith(receivedBytes: written));
 
       final current = _find(id);
       if (current == null) return;
       if (current.totalBytes > 0 && written < current.totalBytes) {
-        await _retry(id, url, 'connection ended at $written/${current.totalBytes}');
+        await _retry(id, 'connection ended at $written/${current.totalBytes}',
+            progressed: written > from);
         return;
       }
       await _finish(id);
-    } on DioException catch (e) {
-      if (CancelToken.isCancel(e)) return;
+    } on FileSystemException catch (e) {
+      await _closeQuietly(raf);
       if (_disposed || _activeId != id) return;
-      await _retry(id, url, e.message ?? 'connection dropped');
+      final lowSpace = (e.osError?.errorCode ?? 0) == 28; // ENOSPC
+      await _fail(
+        id,
+        lowSpace ? 'Not enough disk space' : 'Could not write the file: ${e.message}',
+      );
     } catch (e) {
+      // Everything else — DioException, SocketException, HttpException
+      // ("Connection closed while receiving data"), TimeoutException, the
+      // stall watchdog — is a network problem: resume from the .part.
+      await _closeQuietly(raf);
       if (_disposed || _activeId != id) return;
-      await _fail(id, 'Could not write the file: $e');
+      if (e is DioException && CancelToken.isCancel(e) && !_stalled) return;
+      _cancelToken = null;
+      final why = _stalled
+          ? 'no data for 30 seconds'
+          : e is DioException
+              ? (e.message ?? e.type.name)
+              : e.toString();
+      await _retry(id, why, progressed: written > from, network: true);
     }
   }
 
-  Future<void> _retry(String id, String url, String why) async {
+  Future<void> _retry(
+    String id,
+    String why, {
+    required bool progressed,
+    bool network = false,
+  }) async {
     if (_activeId != id) return;
-    _retries++;
+    // Progress made on this attempt = the link works; start counting afresh.
+    if (progressed) _retries = 0;
+    // Offline: don't burn retries, wait for the network to return (with a
+    // slow fallback poll in case the connectivity event never arrives).
+    final offline = !_online;
+    if (!offline) _retries++;
     if (_retries > consts.Downloads.maxRetries) {
+      if (network) _netFailed.add(id);
       await _fail(id, why);
       return;
     }
-    final ms = min(
-      consts.Downloads.maxBackoff.inMilliseconds,
-      1000 * (1 << min(4, _retries - 1)),
-    );
+    final ms = offline
+        ? 30000
+        : min(
+            consts.Downloads.maxBackoff.inMilliseconds,
+            1000 * (1 << min(4, max(0, _retries - 1))),
+          );
     Log.i(_tag, 'retry $_retries for $id: $why in ${ms}ms');
+    _speeds[id] = 0;
     _retryTimer?.cancel();
-    _retryTimer = Timer(Duration(milliseconds: ms), () async {
+    _retryTimer = Timer(Duration(milliseconds: ms), () {
+      _retryTimer = null;
       if (_activeId != id || _disposed) return;
-      var have = 0;
-      final item = _find(id);
-      if (item != null) {
-        try {
-          final part = File(item.partPath);
-          if (await part.exists()) have = await part.length();
-        } catch (_) {}
-      }
-      await _request(id, url, have, 0);
+      unawaited(_attempt(id));
     });
+    _emit();
   }
 
   Future<void> _fail(String id, String message) async {
@@ -418,6 +597,7 @@ class DownloadManager {
           status: DownloadStatus.completed,
           filePath: finalPath,
           completedAt: DateTime.now(),
+          receivedBytes: it.totalBytes > 0 ? it.totalBytes : it.receivedBytes,
           totalBytes: it.totalBytes > 0 ? it.totalBytes : it.receivedBytes,
         ),
       );
@@ -428,6 +608,7 @@ class DownloadManager {
             error: 'Could not finish the file: $e',
           ));
     }
+    if (_notifId == id) _notifId = null;
     unawaited(_pump());
   }
 
@@ -442,24 +623,29 @@ class DownloadManager {
     } catch (_) {}
     _cancelToken = null;
 
-    try {
-      await _sink?.close();
-    } catch (_) {}
-    _sink = null;
-
     _lease?.release();
     _lease = null;
 
     if (id != null) {
+      final live = _liveBytes;
       _speeds.remove(id);
-      if (nextStatus != null) {
-        _update(id, (it) => it.copyWith(status: nextStatus));
-      }
+      _update(id, (it) => it.copyWith(
+            status: nextStatus,
+            receivedBytes: live >= 0 ? live : null,
+          ));
     }
+    _liveBytes = -1;
     _stopTickerIfIdle();
   }
 
-  // ---- Speed ticker -------------------------------------------------------
+  Future<void> _closeQuietly(RandomAccessFile? raf) async {
+    if (raf == null) return;
+    try {
+      await raf.close();
+    } catch (_) {}
+  }
+
+  // ---- Speed ticker / watchdog / notification -----------------------------
 
   void _ensureTicker() {
     if (_ticker != null) return;
@@ -479,6 +665,20 @@ class DownloadManager {
       _speeds[id] = prev == null ? instant : prev * 0.6 + instant * 0.4;
       _windowBytes = 0;
       _windowStart = now;
+
+      final live = _liveBytes;
+      if (live >= 0) _updateQuiet(id, (it) => it.copyWith(receivedBytes: live));
+
+      // Stall watchdog: a connection that is open but silent is killed and
+      // resumed instead of hanging forever.
+      final token = _cancelToken;
+      if (token != null &&
+          !token.isCancelled &&
+          now.difference(_lastByteAt) > _stallAfter) {
+        Log.w(_tag, 'stalled; aborting to resume');
+        _stalled = true;
+        token.cancel('stalled');
+      }
       _emit();
     });
   }
@@ -487,6 +687,68 @@ class DownloadManager {
     if (_activeId != null) return;
     _ticker?.cancel();
     _ticker = null;
+  }
+
+  /// Keep the foreground service in step with the queue. Called on every
+  /// emit (≈1/s while downloading, plus status changes).
+  void _syncService() {
+    if (_disposed) return;
+    DownloadItem? shown;
+    if (_activeId != null) shown = _find(_activeId!);
+    shown ??= _items.firstWhereOrNull((it) =>
+        it.status == DownloadStatus.waiting || it.status == DownloadStatus.queued);
+    if (shown == null && _notifId != null) {
+      final it = _find(_notifId!);
+      if (it != null && it.status == DownloadStatus.paused) shown = it;
+    }
+    if (shown == null) {
+      _notifId = null;
+      unawaited(_service.stop());
+      return;
+    }
+    _notifId = shown.id;
+    final paused = shown.status == DownloadStatus.paused;
+    final pct = (shown.progress * 100).floor();
+    final queued = _items
+        .where((it) =>
+            it.id != shown!.id &&
+            (it.status == DownloadStatus.queued || it.status == DownloadStatus.waiting))
+        .length;
+    String detail;
+    if (paused) {
+      detail = 'Paused';
+    } else if (shown.status == DownloadStatus.waiting) {
+      detail = 'Waiting for playback to finish';
+    } else if (shown.status == DownloadStatus.queued) {
+      detail = 'Queued';
+    } else if (_retryTimer != null && _activeId == shown.id) {
+      detail = _online ? 'Reconnecting…' : 'Waiting for network…';
+    } else {
+      final speed = speedOf(shown.id);
+      detail = speed > 0 ? _fmtSpeed(speed) : 'Connecting…';
+      if (shown.totalBytes > 0) {
+        detail = '${_fmtBytes(shown.receivedBytes)} / ${_fmtBytes(shown.totalBytes)} · $detail';
+      }
+    }
+    if (queued > 0) detail = '$detail · $queued more queued';
+    unawaited(_service.show(
+      id: shown.id,
+      title: shown.subtitle.isNotEmpty && shown.isEpisode
+          ? '${shown.title} — ${shown.subtitle}'
+          : shown.title,
+      percent: shown.totalBytes > 0 ? pct : -1,
+      detail: detail,
+      paused: paused,
+    ));
+  }
+
+  static String _fmtSpeed(double bps) => '${_fmtBytes(bps.round())}/s';
+
+  static String _fmtBytes(int b) {
+    if (b >= 1 << 30) return '${(b / (1 << 30)).toStringAsFixed(2)} GB';
+    if (b >= 1 << 20) return '${(b / (1 << 20)).toStringAsFixed(1)} MB';
+    if (b >= 1 << 10) return '${(b / (1 << 10)).toStringAsFixed(0)} KB';
+    return '$b B';
   }
 
   // ---- Paths --------------------------------------------------------------
@@ -569,11 +831,14 @@ class DownloadManager {
   void _emit() {
     if (_disposed || _changes.isClosed) return;
     _changes.add(items);
+    _syncService();
   }
 
   Future<void> dispose() async {
-    _disposed = true;
     await _stopActive(DownloadStatus.queued);
+    _disposed = true;
+    await _netSub?.cancel();
+    await _service.stop();
     _ticker?.cancel();
     _retryTimer?.cancel();
     _store.write(_kItems, _items.map((it) => it.toJson()).toList());

@@ -118,9 +118,7 @@ class PlayerControls extends StatelessWidget {
                   ),
                   const SizedBox(width: Insets.sm),
                   RoundPlayerButton(
-                    icon: fit == BoxFit.contain
-                        ? Icons.fit_screen_rounded
-                        : Icons.crop_free_rounded,
+                    icon: Icons.aspect_ratio_rounded,
                     onTap: () {
                       onInteract();
                       onToggleFit();

@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../core/utils/app_orientation.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -60,11 +61,7 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
     // Spec §25: the player and everything it owns goes with the screen.
     unawaited(_player?.dispose());
     unawaited(WakelockPlus.disable());
-    unawaited(SystemChrome.setPreferredOrientations(const [
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]));
+    unawaited(AppOrientation.restore(isTv: ref.read(isTvProvider)));
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
@@ -132,11 +129,7 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
       ]);
     } else {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      SystemChrome.setPreferredOrientations(const [
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+      AppOrientation.restore(isTv: ref.read(isTvProvider));
     }
   }
 

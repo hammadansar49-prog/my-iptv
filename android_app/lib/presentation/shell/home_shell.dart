@@ -1,4 +1,4 @@
-import 'dart:ui';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +9,7 @@ import '../downloads/downloads_screen.dart';
 import '../epg/epg_screen.dart';
 import '../home/home_screen.dart';
 import '../profile/profile_screen.dart';
+import '../../services/player/player_controller.dart';
 import '../providers.dart';
 
 /// The four-tab shell from the design screenshots: Home / EPG / Downloads /
@@ -37,6 +38,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   void _select(int i) {
     if (_index == i) return;
+    // Tabs stay alive in the IndexedStack, so an inline player (EPG) would
+    // keep playing audio behind another tab. Leaving a tab stops it.
+    unawaited(PlayerController.stopActive());
     setState(() {
       _index = i;
       _visited[i] = true;
@@ -98,37 +102,36 @@ class _FloatingNavBar extends StatelessWidget {
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Insets.lg, 0, Insets.lg, Insets.md),
-        // Frosted glass: Home's rows scroll under the bar (extendBody), so
-        // it is translucent and blurs what passes beneath it.
+        // Deliberately not a BackdropFilter: Home scrolls under the bar
+        // (extendBody), and a live blur there was re-run every scroll frame,
+        // which made scrolling stutter. A dense translucent fill reads as
+        // glass without the per-frame cost.
         child: ClipRRect(
           borderRadius: radius,
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-            child: Container(
-              // 66 was 5px too short for a selected phone tab: icon (22) + its
-              // selected-state padding (8+8) + the label gap (2) + the label
-              // text overflowed the Column's available height by exactly
-              // 5.0px (confirmed via a real-device layout exception), which
-              // painted a yellow/black overflow banner over the nav bar.
-              height: tv ? 76 : 72,
-              decoration: BoxDecoration(
-                color: const Color(0xB31B1B1D),
-                borderRadius: radius,
-                border: Border.all(color: const Color(0x1FFFFFFF)),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: Insets.sm),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  for (var i = 0; i < tabs.length; i++)
-                    _NavItem(
-                      spec: tabs[i],
-                      selected: i == index,
-                      onTap: () => onSelect(i),
-                      tv: tv,
-                    ),
-                ],
-              ),
+          child: Container(
+            // 66 was 5px too short for a selected phone tab: icon (22) + its
+            // selected-state padding (8+8) + the label gap (2) + the label
+            // text overflowed the Column's available height by exactly
+            // 5.0px (confirmed via a real-device layout exception), which
+            // painted a yellow/black overflow banner over the nav bar.
+            height: tv ? 76 : 72,
+            decoration: BoxDecoration(
+              color: const Color(0xF21B1B1D),
+              borderRadius: radius,
+              border: Border.all(color: const Color(0x1FFFFFFF)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: Insets.sm),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                for (var i = 0; i < tabs.length; i++)
+                  _NavItem(
+                    spec: tabs[i],
+                    selected: i == index,
+                    onTap: () => onSelect(i),
+                    tv: tv,
+                  ),
+              ],
             ),
           ),
         ),
@@ -166,7 +169,9 @@ class _NavItem extends StatelessWidget {
         label: spec.label,
         child: Padding(
           padding: const EdgeInsets.symmetric(
-              vertical: Insets.xs + 2, horizontal: 2),
+            vertical: Insets.xs + 2,
+            horizontal: 2,
+          ),
           child: Material(
             type: MaterialType.transparency,
             child: InkWell(
@@ -198,8 +203,9 @@ class _NavItem extends StatelessWidget {
                       style: TextStyle(
                         color: color,
                         fontSize: tv ? 13 : 11,
-                        fontWeight:
-                            selected ? FontWeight.w600 : FontWeight.w400,
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.w400,
                       ),
                     ),
                   ],

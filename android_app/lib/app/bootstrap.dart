@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
+import '../core/utils/app_orientation.dart';
 
 import '../core/security/device_identity.dart';
 import '../core/storage/local_store.dart';
@@ -42,17 +43,9 @@ class Bootstrap {
       Log.w(_tag, 'TV detection failed, assuming handset: $e');
     }
 
-    // A TV is always landscape; a handset may rotate. The player overrides
-    // this while fullscreen (spec §53).
-    await SystemChrome.setPreferredOrientations(
-      isTv
-          ? const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
-          : const [
-              DeviceOrientation.portraitUp,
-              DeviceOrientation.landscapeLeft,
-              DeviceOrientation.landscapeRight,
-            ],
-    );
+    // TV landscape, phone portrait; the players go landscape while
+    // fullscreen and restore this on exit (spec §53).
+    await AppOrientation.restore(isTv: isTv);
 
     Log.i(_tag, 'ready (tv=$isTv)');
     return Bootstrap(localStore: store, isTv: isTv);

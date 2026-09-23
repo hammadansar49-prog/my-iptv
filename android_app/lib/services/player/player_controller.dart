@@ -86,6 +86,11 @@ class PlayerController extends ChangeNotifier {
   /// nothing else would start.
   static PlayerController? _active;
 
+  /// Stop whatever is playing app-wide (sound + provider connection). Used
+  /// when the user leaves a screen that keeps its player alive, e.g. the
+  /// EPG tab, which the shell's IndexedStack never disposes.
+  static Future<void> stopActive() async => _active?.stop();
+
   final ConnectionGuard _guard;
 
   Player? _player;
@@ -100,6 +105,13 @@ class PlayerController extends ChangeNotifier {
   PlayerState get state => _state;
 
   VideoController? get videoController => _videoController;
+
+  /// The picture's real display aspect (width/height after pixel aspect),
+  /// from libmpv. Null until the first frame's parameters arrive. SD IPTV
+  /// streams are often 720x576 with non-square pixels; sizing by pixel
+  /// counts alone squashes or stretches them.
+  double? get displayAspect => _displayAspect;
+  double? _displayAspect;
 
   /// Incremented on every open. An async callback from an older open is
   /// ignored rather than being allowed to overwrite newer state (spec §64).
@@ -162,11 +174,22 @@ class PlayerController extends ChangeNotifier {
       if (position != _lastAdvance) {
         _lastAdvance = position;
         _lastAdvanceAt = DateTime.now();
+        _noteHealthy();
       }
       // While a seek is in flight the engine reports the old position; do not
       // fight the user's scrub with it.
       if (_seekInFlight) return;
       _set(_state.copyWith(position: position));
+    });
+
+    sub(player.stream.videoParams, (p) {
+      final dw = p.dw, dh = p.dh;
+      final a = p.aspect ??
+          (dw != null && dh != null && dh > 0 ? dw / dh : null);
+      if (a != null && a > 0 && a != _displayAspect) {
+        _displayAspect = a;
+        notifyListeners();
+      }
     });
 
     sub(player.stream.duration, (duration) {
@@ -325,8 +348,32 @@ class PlayerController extends ChangeNotifier {
     });
   }
 
+  /// When the stream last started advancing without interruption.
+  DateTime? _healthySince;
+
+  /// The live retry budget (Playback.liveMaxRetries) is for a channel that
+  /// will not come up, and CLAUDE.md keeps it at 3 so dead channels fail
+  /// fast. It is not a lifetime allowance: once a recovered stream has
+  /// played cleanly for a while the budget is restored. Before this, three
+  /// brief network blips spread over an hour of viewing used it up and the
+  /// fourth showed "Unable to play this stream" on a channel that was fine.
+  void _noteHealthy() {
+    if (_state.retryAttempt == 0) {
+      _healthySince = null;
+      return;
+    }
+    final now = DateTime.now();
+    _healthySince ??= now;
+    if (now.difference(_healthySince!) >= const Duration(seconds: 15)) {
+      Log.i(_tag, 'stream healthy again — retry budget restored');
+      _healthySince = null;
+      _set(_state.copyWith(retryAttempt: 0));
+    }
+  }
+
   void _handleFailure(AppError error) {
     if (_disposed) return;
+    _healthySince = null;
     _cancelTimers();
     final request = _state.request;
     final attempt = _state.retryAttempt;
@@ -355,6 +402,7 @@ class PlayerController extends ChangeNotifier {
 
   void _retryCurrent(int generation) {
     if (_disposed || generation != _generation) return;
+    _healthySince = null;
     final request = _state.request;
     if (request == null) return;
     final attempt = _state.retryAttempt;

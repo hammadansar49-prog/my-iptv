@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
@@ -21,12 +20,12 @@ import 'home_rows.dart';
 
 extension on HomeFilter {
   String get label => switch (this) {
-        HomeFilter.all => 'All',
-        HomeFilter.movies => 'Movies',
-        HomeFilter.series => 'Series',
-        HomeFilter.liveTv => 'Live TV',
-        HomeFilter.ott => 'OTT',
-      };
+    HomeFilter.all => 'All',
+    HomeFilter.movies => 'Movies',
+    HomeFilter.series => 'Series',
+    HomeFilter.liveTv => 'Live TV',
+    HomeFilter.ott => 'OTT',
+  };
 }
 
 /// Home: branding, search, type filters, Continue Watching, a featured
@@ -96,7 +95,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (accountId == null) return;
     _streamCountRecorded = true;
     final total = movies + series + channels;
-    ref.read(accountSummaryStoreProvider).record(
+    ref
+        .read(accountSummaryStoreProvider)
+        .record(
           accountId,
           (existing) => existing.copyWith(
             username: ref.read(sessionProvider)?.userInfo.username,
@@ -181,18 +182,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         onTap: _openScopedSearch,
         decoration: InputDecoration(
           hintText: 'Search....',
-          prefixIcon: const Icon(Icons.search_rounded,
-              color: AppColors.textSecondary, size: 22),
+          prefixIcon: const Icon(
+            Icons.search_rounded,
+            color: AppColors.textSecondary,
+            size: 22,
+          ),
           suffixIcon: IconButton(
             // Voice search is not implemented; saying so is better than a
             // button that silently does nothing.
             onPressed: () => ScaffoldMessenger.of(context)
               ..hideCurrentSnackBar()
-              ..showSnackBar(const SnackBar(
-                content: Text('Voice search is not available yet.'),
-              )),
-            icon: const Icon(Icons.mic_none_rounded,
-                color: AppColors.textSecondary, size: 22),
+              ..showSnackBar(
+                const SnackBar(
+                  content: Text('Voice search is not available yet.'),
+                ),
+              ),
+            icon: const Icon(
+              Icons.mic_none_rounded,
+              color: AppColors.textSecondary,
+              size: 22,
+            ),
           ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(Radii.pill),
@@ -238,8 +247,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final section = switch (_filter) {
       HomeFilter.series => ContentSection.series,
       HomeFilter.liveTv => ContentSection.live,
-      HomeFilter.movies || HomeFilter.all || HomeFilter.ott =>
-        ContentSection.movies,
+      HomeFilter.movies ||
+      HomeFilter.all ||
+      HomeFilter.ott => ContentSection.movies,
     };
     ref.read(selectedCategoryProvider(section).notifier).state = '';
     switch (section) {
@@ -269,10 +279,10 @@ class _TitleBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final top = MediaQuery.paddingOf(context).top;
-    final title = Theme.of(context)
-        .textTheme
-        .headlineSmall
-        ?.copyWith(fontWeight: FontWeight.w500, letterSpacing: 0.3);
+    final title = Theme.of(context).textTheme.headlineSmall?.copyWith(
+      fontWeight: FontWeight.w500,
+      letterSpacing: 0.3,
+    );
 
     return Stack(
       children: [
@@ -287,16 +297,13 @@ class _TitleBar extends StatelessWidget {
               duration: const Duration(milliseconds: 220),
               child: child,
             ),
-            child: ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                child: const DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Color(0x99101012),
-                    border: Border(
-                      bottom: BorderSide(color: Color(0x14FFFFFF), width: 0.5),
-                    ),
-                  ),
+            // Solid tint rather than a BackdropFilter: a live blur under a
+            // pinned header is recomputed on every scroll frame.
+            child: const DecoratedBox(
+              decoration: BoxDecoration(
+                color: Color(0xEB0E0E10),
+                border: Border(
+                  bottom: BorderSide(color: Color(0x14FFFFFF), width: 0.5),
                 ),
               ),
             ),
@@ -304,7 +311,11 @@ class _TitleBar extends StatelessWidget {
         ),
         Padding(
           padding: EdgeInsets.fromLTRB(
-              Insets.lg, top + Insets.sm, Insets.lg, Insets.sm),
+            Insets.lg,
+            top + Insets.sm,
+            Insets.lg,
+            Insets.sm,
+          ),
           child: Row(
             children: [
               Expanded(child: Text('MY IPTV', style: title)),
@@ -558,21 +569,21 @@ class _Backdrop extends StatelessWidget {
               duration: const Duration(milliseconds: 500),
               child: current == null
                   ? const SizedBox.shrink(key: ValueKey('none'))
-                  : ImageFiltered(
+                  // No live blur filter: decoded at 24px wide and scaled up
+                  // with smooth filtering, the poster is already a soft
+                  // colour wash. An ImageFiltered blur here was re-run on
+                  // the GPU every scroll frame (Skia; Impeller is off),
+                  // which is what made Home scrolling stutter.
+                  : CachedNetworkImage(
                       key: ValueKey(current),
-                      imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-                      // Blurred beyond recognition anyway, so decode it
-                      // tiny: the full-size poster was megabytes of bitmap
-                      // for a smear.
-                      child: CachedNetworkImage(
-                        imageUrl: current,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                        memCacheWidth: 200,
-                        fadeInDuration: Duration.zero,
-                        errorWidget: (_, __, ___) => const SizedBox.shrink(),
-                      ),
+                      imageUrl: current,
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: double.infinity,
+                      memCacheWidth: 24,
+                      filterQuality: FilterQuality.medium,
+                      fadeInDuration: Duration.zero,
+                      errorWidget: (_, __, ___) => const SizedBox.shrink(),
                     ),
             ),
           ),
@@ -625,9 +636,11 @@ class _FeaturedCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final text = Theme.of(context).textTheme;
 
-    final favoriteKey = item.movie?.key ?? item.series?.key ?? item.channel?.key;
+    final favoriteKey =
+        item.movie?.key ?? item.series?.key ?? item.channel?.key;
     ref.watch(libraryRevisionProvider);
-    final isFavorite = favoriteKey != null &&
+    final isFavorite =
+        favoriteKey != null &&
         ref.read(libraryRepositoryProvider).isFavorite(favoriteKey);
 
     return LayoutBuilder(
@@ -689,16 +702,19 @@ class _FeaturedCard extends ConsumerWidget {
                         Expanded(
                           child: FilledButton.icon(
                             style: FilledButton.styleFrom(
-                              backgroundColor:
-                                  Colors.white.withValues(alpha: 0.16),
+                              backgroundColor: Colors.white.withValues(
+                                alpha: 0.16,
+                              ),
                               foregroundColor: Colors.white,
                             ),
                             onPressed: favoriteKey == null
                                 ? null
                                 : () => _toggleFavorite(ref, favoriteKey),
-                            icon: Icon(isFavorite
-                                ? Icons.check_rounded
-                                : Icons.add_rounded),
+                            icon: Icon(
+                              isFavorite
+                                  ? Icons.check_rounded
+                                  : Icons.add_rounded,
+                            ),
                             label: const Text('My List'),
                           ),
                         ),
@@ -737,22 +753,26 @@ class _FeaturedCard extends ConsumerWidget {
     final section = item.movie != null
         ? ContentSection.movies
         : item.series != null
-            ? ContentSection.series
-            : ContentSection.live;
+        ? ContentSection.series
+        : ContentSection.live;
     final refId = item.movie != null
         ? '${item.movie!.streamId}'
         : item.series != null
-            ? '${item.series!.seriesId}'
-            : '${item.channel!.streamId}';
+        ? '${item.series!.seriesId}'
+        : '${item.channel!.streamId}';
 
-    ref.read(libraryRepositoryProvider).toggleFavorite(FavoriteEntry(
-          key: key,
-          section: section,
-          title: item.title,
-          refId: refId,
-          thumb: item.artwork,
-          addedAt: DateTime.now(),
-        ));
+    ref
+        .read(libraryRepositoryProvider)
+        .toggleFavorite(
+          FavoriteEntry(
+            key: key,
+            section: section,
+            title: item.title,
+            refId: refId,
+            thumb: item.artwork,
+            addedAt: DateTime.now(),
+          ),
+        );
   }
 }
 

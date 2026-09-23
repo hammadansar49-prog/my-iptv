@@ -1,4 +1,6 @@
+import 'dart:ui' show ImageFilter;
 import 'dart:async';
+import '../../core/utils/app_orientation.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -52,7 +54,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   bool _controlsVisible = true;
   bool _locked = false;
   double? _brightness;
-  BoxFit _fit = BoxFit.contain;
+  VideoAspect _aspect = VideoAspect.original;
+
+  /// Bumped on every aspect change so the badge replays its animation.
+  int _aspectShown = 0;
   PlaybackRequest? _previous;
   Timer? _hideTimer;
   Timer? _historyTicker;
@@ -455,11 +460,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       unawaited(ScreenBrightness().resetApplicationScreenBrightness());
     } catch (_) {}
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    unawaited(SystemChrome.setPreferredOrientations(const [
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]));
+    unawaited(AppOrientation.restore(isTv: ref.read(isTvProvider)));
     super.dispose();
   }
 
@@ -513,7 +514,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 Video(
                   controller: _player.videoController!,
                   controls: NoVideoControls,
-                  fit: _fit,
+                  fit: _aspect.fit,
+                  aspectRatio: _aspect.ratio ?? _player.displayAspect,
+                ),
+
+              if (_aspectShown > 0)
+                IgnorePointer(
+                  child: Center(
+                    child: _AspectBadge(
+                      key: ValueKey(_aspectShown),
+                      label: _aspect.label,
+                    ),
+                  ),
                 ),
 
               if (state.phase == PlaybackPhase.opening ||
@@ -571,14 +583,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                   isSeries:
                       widget.request.section == ContentSection.series,
                   brightness: _brightness,
-                  fit: _fit,
+                  fit: _aspect.fit,
                   onSeekBy: _seekBy,
                   onSeekTo: _player.seekTo,
                   onToggleLock: () => setState(() => _locked = !_locked),
                   onToggleFit: () => setState(() {
-                    _fit = _fit == BoxFit.contain
-                        ? BoxFit.cover
-                        : BoxFit.contain;
+                    _aspect = VideoAspect.values[
+                        (_aspect.index + 1) % VideoAspect.values.length];
+                    _aspectShown++;
                   }),
                   onBack: () => Navigator.of(context).maybePop(),
                   onInteract: _scheduleHide,
@@ -646,6 +658,95 @@ class _ErrorOverlay extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The aspect modes the ratio button cycles through.
+enum VideoAspect {
+  /// The stream's real display aspect (see PlayerController.displayAspect).
+  original('Original', BoxFit.contain, null),
+  wide('16:9', BoxFit.fill, 16 / 9),
+  classic('4:3', BoxFit.fill, 4 / 3),
+
+  /// Fill the screen, distorting if the shapes differ.
+  stretch('Stretch', BoxFit.fill, null),
+
+  /// Fill the screen without distortion, cropping the edges.
+  zoom('Zoom', BoxFit.cover, null);
+
+  const VideoAspect(this.label, this.fit, this.ratio);
+  final String label;
+  final BoxFit fit;
+  final double? ratio;
+}
+
+/// A frosted pill naming the new aspect mode: pops in, holds, fades away.
+class _AspectBadge extends StatefulWidget {
+  const _AspectBadge({super.key, required this.label});
+
+  final String label;
+
+  @override
+  State<_AspectBadge> createState() => _AspectBadgeState();
+}
+
+class _AspectBadgeState extends State<_AspectBadge>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..forward();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        final t = _c.value;
+        // 0-15% pop in, hold, last 25% fade out.
+        final opacity = t < 0.15
+            ? t / 0.15
+            : t > 0.75
+                ? (1 - t) / 0.25
+                : 1.0;
+        final scale = t < 0.15
+            ? 0.8 + 0.2 * Curves.easeOutBack.transform(t / 0.15)
+            : 1.0;
+        return Opacity(
+          opacity: opacity.clamp(0.0, 1.0),
+          child: Transform.scale(scale: scale, child: child),
+        );
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+            ),
+            child: Text(
+              widget.label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 26,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
