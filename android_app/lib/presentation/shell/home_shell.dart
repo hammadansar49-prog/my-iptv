@@ -167,48 +167,55 @@ class _NavItem extends StatelessWidget {
         button: true,
         selected: selected,
         label: spec.label,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            vertical: Insets.xs + 2,
-            horizontal: 2,
-          ),
-          child: Material(
-            type: MaterialType.transparency,
-            child: InkWell(
-              onTap: onTap,
-              borderRadius: radius,
-              // TV needs a visible focus ring on every interactive item (§36).
-              focusColor: AppColors.accentSoft,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOut,
-                decoration: BoxDecoration(
-                  color: selected ? _capsule : Colors.transparent,
-                  borderRadius: radius,
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      selected ? spec.activeIcon : spec.icon,
-                      color: color,
-                      size: iconSize,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      spec.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.fade,
-                      softWrap: false,
-                      style: TextStyle(
+        // The whole cell is the target, padding included. The padding
+        // around the capsule used to swallow taps, so a tap near an edge
+        // "did nothing" and people had to press 2-3 times.
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              vertical: Insets.xs + 2,
+              horizontal: 2,
+            ),
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: radius,
+                // TV needs a visible focus ring on every interactive item (§36).
+                focusColor: AppColors.accentSoft,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  decoration: BoxDecoration(
+                    color: selected ? _capsule : Colors.transparent,
+                    borderRadius: radius,
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        selected ? spec.activeIcon : spec.icon,
                         color: color,
-                        fontSize: tv ? 13 : 11,
-                        fontWeight: selected
-                            ? FontWeight.w600
-                            : FontWeight.w400,
+                        size: iconSize,
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Text(
+                        spec.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.fade,
+                        softWrap: false,
+                        style: TextStyle(
+                          color: color,
+                          fontSize: tv ? 13 : 11,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
