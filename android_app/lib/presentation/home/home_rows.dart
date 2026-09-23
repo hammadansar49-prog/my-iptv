@@ -1092,7 +1092,7 @@ class _ContinueCard extends ConsumerWidget {
               title: const Text('Remove from Continue Watching'),
               onTap: () {
                 Navigator.of(sheet).pop();
-                ref.read(libraryRepositoryProvider).removeHistory(entry.key);
+                _remove(context, ref);
               },
             ),
             const SizedBox(height: Insets.sm),
@@ -1100,6 +1100,16 @@ class _ContinueCard extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  void _remove(BuildContext context, WidgetRef ref) {
+    final entry = item.entry;
+    ref.read(libraryRepositoryProvider).removeHistory(entry.key);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text('Removed "${entry.title}" from Continue Watching'),
+      ));
   }
 
   @override
@@ -1137,6 +1147,28 @@ class _ContinueCard extends ConsumerWidget {
                     label: 'Resume ${entry.title}',
                     onTap: () => _resume(context, ref),
                     onLongPress: () => _showActions(context, ref),
+                  ),
+                ),
+                // Above the tap layer so it wins the hit test.
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Semantics(
+                    button: true,
+                    label: 'Remove ${entry.title} from Continue Watching',
+                    child: Material(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () => _remove(context, ref),
+                        child: const SizedBox.square(
+                          dimension: 30,
+                          child: Icon(Icons.close_rounded,
+                              size: 17, color: Colors.white),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ],
