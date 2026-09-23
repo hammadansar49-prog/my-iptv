@@ -118,26 +118,38 @@ class XtreamApi {
   Future<List<LiveChannel>> liveStreams({
     String? categoryId,
     CancelToken? cancel,
+    void Function(int received, int total)? onProgress,
   }) async {
     final text = await _http.getText(
       _api('get_live_streams', _categoryParam(categoryId)),
       cancel: cancel,
+      onProgress: onProgress,
     );
     return _parseCatalogue('live', text, LiveChannel.fromJson);
   }
 
-  Future<List<Movie>> vodStreams({String? categoryId, CancelToken? cancel}) async {
+  Future<List<Movie>> vodStreams({
+    String? categoryId,
+    CancelToken? cancel,
+    void Function(int received, int total)? onProgress,
+  }) async {
     final text = await _http.getText(
       _api('get_vod_streams', _categoryParam(categoryId)),
       cancel: cancel,
+      onProgress: onProgress,
     );
     return _parseCatalogue('movies', text, Movie.fromJson);
   }
 
-  Future<List<Series>> series({String? categoryId, CancelToken? cancel}) async {
+  Future<List<Series>> series({
+    String? categoryId,
+    CancelToken? cancel,
+    void Function(int received, int total)? onProgress,
+  }) async {
     final text = await _http.getText(
       _api('get_series', _categoryParam(categoryId)),
       cancel: cancel,
+      onProgress: onProgress,
     );
     return _parseCatalogue('series', text, Series.fromJson);
   }

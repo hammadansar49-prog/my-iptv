@@ -11,6 +11,7 @@ import '../../services/download/download_manager.dart';
 import '../../services/player/playback_request.dart';
 import '../providers.dart';
 import '../widgets/error_banner.dart';
+import '../widgets/download_button.dart';
 import '../widgets/network_artwork.dart';
 
 /// Series → seasons → episodes → player (spec §16). Same full-bleed-poster
@@ -486,33 +487,18 @@ class _EpisodeRow extends ConsumerWidget {
                     ],
                   ),
                 ),
-                Material(
-                  color: AppColors.surfaceHigh,
-                  shape: const CircleBorder(),
-                  child: InkWell(
-                    customBorder: const CircleBorder(),
-                    focusColor: AppColors.accentSoft,
-                    onTap: () {
-                      ref.read(downloadManagerProvider).add(DownloadRequest(
-                            url: repo.episodeUrl(episode),
-                            title: series.name,
-                            ext: episode.ext,
-                            subtitle: episode.title,
-                            seriesName: series.name,
-                            seasonEpisodeTag: episode.tag,
-                            thumb: episode.still ?? series.cover,
-                            isEpisode: true,
-                          ));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Added to downloads')),
-                      );
-                    },
-                    child: const SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: Icon(Icons.download_rounded,
-                          size: 18, color: AppColors.textSecondary),
-                    ),
+                DownloadButton(
+                  url: repo.episodeUrl(episode),
+                  background: AppColors.surfaceHigh,
+                  buildRequest: () => DownloadRequest(
+                    url: repo.episodeUrl(episode),
+                    title: series.name,
+                    ext: episode.ext,
+                    subtitle: episode.title,
+                    seriesName: series.name,
+                    seasonEpisodeTag: episode.tag,
+                    thumb: episode.still ?? series.cover,
+                    isEpisode: true,
                   ),
                 ),
               ],

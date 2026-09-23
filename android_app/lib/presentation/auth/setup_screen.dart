@@ -62,7 +62,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             Row(
               children: [
                 Expanded(
-                  child: Text('TheOttDeals', style: text.displaySmall),
+                  child: Text('MY IPTV', style: text.displaySmall),
                 ),
                 IconButton(
                   onPressed: () => context.push(Routes.settings),

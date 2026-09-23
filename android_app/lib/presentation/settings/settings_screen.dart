@@ -107,7 +107,7 @@ class SettingsScreen extends ConsumerWidget {
               builder: (context, snap) => _TapRow(
                 icon: Icons.info_outline_rounded,
                 color: AppColors.tileBlue,
-                title: 'TheOttDeals',
+                title: 'MY IPTV',
                 subtitle: snap.hasData
                     ? 'Version ${snap.data!.version} (${snap.data!.buildNumber})'
                     : 'Version —',

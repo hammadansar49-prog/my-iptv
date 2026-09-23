@@ -55,7 +55,8 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
     setState(() => _busyAccountId = null);
 
     if (ok) {
-      context.go(Routes.home);
+      // A different account means a fresh (empty) catalogue cache.
+      context.go(Routes.catalogLoading, extra: Routes.home);
     } else {
       final error = ref.read(authControllerProvider).error;
       ScaffoldMessenger.of(context)

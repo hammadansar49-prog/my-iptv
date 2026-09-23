@@ -45,14 +45,22 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   Future<void> _start() async {
     final stopwatch = Stopwatch()..start();
     var target = Routes.login;
+    var settled = false;
 
     try {
       await Future.any([
         _initialise().then((restored) {
-          target = restored ? Routes.home : Routes.login;
+          settled = true;
+          // A restored session loads the catalogue on the loading screen
+          // (which then continues to Home) rather than dropping onto a Home
+          // that has to fetch everything itself.
+          target = restored ? Routes.catalogLoading : Routes.login;
         }),
         Future<void>.delayed(_deadline).then((_) {
-          Log.w(_tag, 'startup hit the ${_deadline.inSeconds}s deadline');
+          // This timer always fires; only report it if it actually won.
+          if (!settled) {
+            Log.w(_tag, 'startup hit the ${_deadline.inSeconds}s deadline');
+          }
         }),
       ]);
     } catch (e, st) {
@@ -125,7 +133,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                 ),
                 const SizedBox(height: Insets.xl),
                 Text(
-                  'TheOttDeals',
+                  'MY IPTV',
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: Insets.xxl),

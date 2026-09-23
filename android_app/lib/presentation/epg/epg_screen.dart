@@ -107,7 +107,6 @@ class _EpgScreenState extends ConsumerState<EpgScreen> {
   PlayerController _ensurePlayer() {
     return _player ??= PlayerController(
       guard: ref.read(connectionGuardProvider),
-      http: ref.read(httpClientProvider),
     )..addListener(_onPlayerChanged);
   }
 

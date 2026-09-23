@@ -50,6 +50,15 @@ abstract interface class ContentRepository {
   String movieUrl(Movie movie);
   String episodeUrl(Episode episode);
 
+  /// Fetch one section's full catalogue into the cache ahead of time — the
+  /// post-login loading screen. [onBytes] reports real download progress
+  /// (`total` is -1 when the panel sends no Content-Length). Returns the
+  /// number of rows; later reads of that section come from the cache.
+  Future<int> preload(
+    ContentSection section, {
+    void Function(int received, int total)? onBytes,
+  });
+
   /// Drop cached catalogue data (the "Refresh Content" settings row).
   Future<void> invalidate();
 }

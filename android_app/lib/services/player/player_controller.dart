@@ -7,7 +7,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/errors/app_error.dart';
 import '../../core/network/connection_guard.dart';
-import '../../core/network/http_client.dart';
 import '../../core/utils/logger.dart';
 import 'playback_request.dart';
 
@@ -75,16 +74,19 @@ class PlayerState {
 /// Spec §21: rapid ±10 presses must not spawn player instances or overlapping
 /// seeks — [seekBy] coalesces into a single pending target.
 class PlayerController extends ChangeNotifier {
-  PlayerController({
-    required ConnectionGuard guard,
-    required HttpClient http,
-  })  : _guard = guard,
-        _http = http;
+  PlayerController({required ConnectionGuard guard}) : _guard = guard;
 
   static const _tag = 'PlayerController';
 
+  /// The one controller allowed to be playing, app-wide. A new playback
+  /// stops the previous owner outright — audio and provider connection —
+  /// rather than queueing behind it. Without this, a player that outlived
+  /// its screen (a double-tapped Play pushing two player routes, say) kept
+  /// playing sound after Back and held the account's single connection, so
+  /// nothing else would start.
+  static PlayerController? _active;
+
   final ConnectionGuard _guard;
-  final HttpClient _http;
 
   Player? _player;
   VideoController? _videoController;
@@ -179,6 +181,16 @@ class PlayerController extends ChangeNotifier {
       if (_state.phase == PlaybackPhase.failed) return;
       if (buffering) {
         _set(_state.copyWith(phase: PlaybackPhase.buffering));
+      } else if (_state.phase == PlaybackPhase.buffering) {
+        // Leave "buffering" when the engine does. libmpv emits `playing`
+        // once, usually *before* the first buffering stall, so waiting for
+        // it to fire again left the UI on "Buffering..." (and a Play icon)
+        // for the whole film while the video was actually running.
+        _set(_state.copyWith(
+          phase: player.state.playing
+              ? PlaybackPhase.playing
+              : PlaybackPhase.paused,
+        ));
       }
     });
 
@@ -215,6 +227,14 @@ class PlayerController extends ChangeNotifier {
     await _ensurePlayer();
     if (generation != _generation || _disposed) return;
 
+    final previous = _active;
+    if (previous != null && !identical(previous, this)) {
+      Log.i(_tag, 'stopping the previous player before a new playback');
+      await previous.stop();
+      if (generation != _generation || _disposed) return;
+    }
+    _active = this;
+
     // A local file needs no provider connection at all (spec §29).
     if (request.isLocal) {
       await _openMedia(request, generation);
@@ -242,21 +262,15 @@ class PlayerController extends ChangeNotifier {
       return;
     }
 
-    // Spec §24: never hand raw HTML/JSON to the media engine. The probe runs
-    // on the connection we already hold, so it is not a second socket.
-    final probe = await _http.probeMedia(request.url);
-    if (generation != _generation || _disposed) return;
-    if (!probe.looksPlayable) {
-      Log.w(_tag, 'probe rejected: status=${probe.status} type=${probe.contentType}');
-      _handleFailure(AppError(
-        AppErrorKind.playback,
-        'Unable to play this stream.',
-        detail: 'probe status=${probe.status} contentType=${probe.contentType}',
-        retryable: true,
-      ));
-      return;
-    }
-
+    // No HEAD "probe" before opening — AUDIT.md §3 forbids "probe the
+    // stream then play it" on a one-connection account, and on a real panel
+    // it was actively harmful: otv.to answers HEAD with 520 text/plain (or
+    // nothing at all) for episodes that play fine over GET, so every such
+    // episode failed with "Unable to play this stream" before libmpv was
+    // ever asked, and the probe's keep-alive socket could itself be counted
+    // against max_connections=1. libmpv opens the URL directly, exactly as
+    // the PC app does; a genuinely bad URL (HTML error page, 404) fails in
+    // the player and is reported through the normal error path.
     await _openMedia(request, generation);
   }
 
@@ -440,6 +454,7 @@ class PlayerController extends ChangeNotifier {
   /// Stop playback and hand the provider connection back, without tearing
   /// down the Player — used when the inline Live TV screen goes idle.
   Future<void> stop() async {
+    if (identical(_active, this)) _active = null;
     _cancelTimers();
     _generation++;
     try {
@@ -465,6 +480,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    if (identical(_active, this)) _active = null;
     _generation++;
     _cancelTimers();
 

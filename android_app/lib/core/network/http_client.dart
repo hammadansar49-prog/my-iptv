@@ -57,11 +57,23 @@ class HttpClient {
     }
   }
 
-  Future<String> getText(String url, {CancelToken? cancel}) async {
+  /// [onProgress] receives Dio's raw receive progress. `total` is -1 when
+  /// the panel sends no Content-Length — the usual case here, because the
+  /// body is gzipped and decompressed on the fly — so callers must be able
+  /// to work from `received` alone.
+  Future<String> getText(
+    String url, {
+    CancelToken? cancel,
+    void Function(int received, int total)? onProgress,
+  }) async {
     final sw = Stopwatch()..start();
     Log.i('HttpClient', '-> GET ${Log.redact(url)}');
     try {
-      final res = await _dio.get<String>(url, cancelToken: cancel);
+      final res = await _dio.get<String>(
+        url,
+        cancelToken: cancel,
+        onReceiveProgress: onProgress,
+      );
       final status = res.statusCode ?? 0;
       Log.i('HttpClient',
           '<- $status (${sw.elapsedMilliseconds}ms, ${res.data?.length ?? 0} bytes) ${Log.redact(url)}');
@@ -115,59 +127,5 @@ class HttpClient {
     }
   }
 
-  /// A cheap reachability/validity probe used before handing a URL to the
-  /// player (spec §24). It is a HEAD, so it does not open a streaming
-  /// connection — but it still costs a provider socket, so it is only ever
-  /// called from inside the connection guard.
-  Future<MediaProbe> probeMedia(String url, {CancelToken? cancel}) async {
-    try {
-      final res = await _dio.head<void>(
-        url,
-        cancelToken: cancel,
-        options: Options(
-          headers: {'User-Agent': Api.downloadUserAgent},
-          followRedirects: true,
-          validateStatus: (_) => true,
-          receiveTimeout: const Duration(seconds: 10),
-        ),
-      );
-      final status = res.statusCode ?? 0;
-      final type = (res.headers.value('content-type') ?? '').toLowerCase();
-      final length = int.tryParse(res.headers.value('content-length') ?? '');
-      return MediaProbe(status: status, contentType: type, contentLength: length);
-    } on DioException catch (e) {
-      if (CancelToken.isCancel(e)) rethrow;
-      return MediaProbe(status: 0, contentType: '', contentLength: null, error: e.message);
-    }
-  }
-
   void close() => _dio.close(force: true);
-}
-
-/// Result of [HttpClient.probeMedia].
-class MediaProbe {
-  const MediaProbe({
-    required this.status,
-    required this.contentType,
-    required this.contentLength,
-    this.error,
-  });
-
-  final int status;
-  final String contentType;
-  final int? contentLength;
-  final String? error;
-
-  /// Content types that mean "this is not video" — the exact failure mode
-  /// spec §24 was written about (raw HTML ending up in the player).
-  static const _notMedia = ['text/html', 'application/json', 'text/plain', 'text/xml'];
-
-  bool get looksPlayable {
-    if (status == 0) return false;
-    // Many panels answer HEAD with 405 or 501 but stream fine on GET; only a
-    // definite auth/not-found answer counts as a refusal.
-    if (status == 401 || status == 403 || status == 404 || status == 410) return false;
-    if (_notMedia.any(contentType.startsWith)) return false;
-    return true;
-  }
 }

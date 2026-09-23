@@ -213,6 +213,17 @@ class ProfileScreen extends ConsumerWidget {
             child: Column(
               children: [
                 _SettingsRow(
+                  icon: Icons.bookmark_rounded,
+                  color: AppColors.accent,
+                  title: 'My Lists',
+                  subtitle: 'Movies, series and channels you saved for later.',
+                  onTap: () => context.push(Routes.favorites),
+                ),
+                const Padding(
+                  padding: EdgeInsets.only(left: 68),
+                  child: Divider(height: 1),
+                ),
+                _SettingsRow(
                   icon: Icons.refresh_rounded,
                   color: AppColors.tileCyan,
                   title: 'Refresh Content',

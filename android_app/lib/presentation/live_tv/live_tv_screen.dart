@@ -72,7 +72,6 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
   PlayerController _ensurePlayer() {
     return _player ??= PlayerController(
       guard: ref.read(connectionGuardProvider),
-      http: ref.read(httpClientProvider),
     )..addListener(_onPlayerChanged);
   }
 

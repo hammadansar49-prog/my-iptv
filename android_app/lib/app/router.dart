@@ -9,6 +9,7 @@ import '../presentation/auth/setup_screen.dart';
 import '../presentation/auth/splash_screen.dart';
 import '../presentation/favorites/favorites_screen.dart';
 import '../presentation/live_tv/live_tv_screen.dart';
+import '../presentation/loading/catalog_loading_screen.dart';
 import '../presentation/movies/movie_detail_screen.dart';
 import '../presentation/movies/movies_screen.dart';
 import '../presentation/player/player_screen.dart';
@@ -43,6 +44,12 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: Routes.xtreamLogin,
         builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: Routes.catalogLoading,
+        builder: (context, state) => CatalogLoadingScreen(
+          next: state.extra is String ? state.extra as String : Routes.home,
+        ),
       ),
       GoRoute(
         path: Routes.accounts,

@@ -64,7 +64,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     _player = PlayerController(
       guard: ref.read(connectionGuardProvider),
-      http: ref.read(httpClientProvider),
     )..addListener(_onPlayerChanged);
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -519,8 +518,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
               if (state.phase == PlaybackPhase.opening ||
                   state.phase == PlaybackPhase.buffering)
-                const Center(
-                  child: Row(
+                // Dead centre is where the big Play/Pause and ±10 buttons
+                // sit; with the controls up the indicator drew underneath
+                // them. Drop it below that row instead while they show.
+                Align(
+                  alignment: _controlsVisible
+                      ? const Alignment(0, 0.3)
+                      : Alignment.center,
+                  child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(

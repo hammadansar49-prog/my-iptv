@@ -100,11 +100,14 @@ class ContentRepositoryImpl implements ContentRepository {
     return all.where((c) => c.categoryId == categoryId).toList();
   }
 
-  Future<List<LiveChannel>> _allChannels() async {
+  Future<List<LiveChannel>> _allChannels({
+    void Function(int, int)? onBytes,
+  }) async {
     final cached = _channels;
     if (cached != null && cached.isFresh(Limits.catalogTtl)) return cached.value;
     return _once('channels', () async {
-      final list = await _fetch('live-streams', () => _api.liveStreams());
+      final list = await _fetch(
+          'live-streams', () => _api.liveStreams(onProgress: onBytes));
       Log.i(_tag, 'loaded ${list.length} channels');
       _channels = _Cached(list);
       return list;
@@ -118,11 +121,12 @@ class ContentRepositoryImpl implements ContentRepository {
     return all.where((m) => m.categoryId == categoryId).toList();
   }
 
-  Future<List<Movie>> _allMovies() async {
+  Future<List<Movie>> _allMovies({void Function(int, int)? onBytes}) async {
     final cached = _movies;
     if (cached != null && cached.isFresh(Limits.catalogTtl)) return cached.value;
     return _once('movies', () async {
-      final list = await _fetch('vod-streams', () => _api.vodStreams());
+      final list = await _fetch(
+          'vod-streams', () => _api.vodStreams(onProgress: onBytes));
       Log.i(_tag, 'loaded ${list.length} movies');
       _movies = _Cached(list);
       return list;
@@ -136,11 +140,12 @@ class ContentRepositoryImpl implements ContentRepository {
     return all.where((s) => s.categoryId == categoryId).toList();
   }
 
-  Future<List<Series>> _allSeries() async {
+  Future<List<Series>> _allSeries({void Function(int, int)? onBytes}) async {
     final cached = _series;
     if (cached != null && cached.isFresh(Limits.catalogTtl)) return cached.value;
     return _once('series', () async {
-      final list = await _fetch('series', () => _api.series());
+      final list =
+          await _fetch('series', () => _api.series(onProgress: onBytes));
       Log.i(_tag, 'loaded ${list.length} series');
       _series = _Cached(list);
       return list;
@@ -278,6 +283,21 @@ class ContentRepositoryImpl implements ContentRepository {
   @override
   String episodeUrl(Episode episode) =>
       _api.episodeStreamUrl(episode.id, ext: episode.ext);
+
+  @override
+  Future<int> preload(
+    ContentSection section, {
+    void Function(int received, int total)? onBytes,
+  }) async {
+    switch (section) {
+      case ContentSection.live:
+        return (await _allChannels(onBytes: onBytes)).length;
+      case ContentSection.movies:
+        return (await _allMovies(onBytes: onBytes)).length;
+      case ContentSection.series:
+        return (await _allSeries(onBytes: onBytes)).length;
+    }
+  }
 
   @override
   Future<void> invalidate() async {

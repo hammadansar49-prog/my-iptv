@@ -144,7 +144,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text('TheOttDeals', style: text.headlineSmall),
+                    child: Text('MY IPTV', style: text.headlineSmall),
                   ),
                   Material(
                     color: AppColors.surface,

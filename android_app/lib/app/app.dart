@@ -15,7 +15,7 @@ class TheOttDealsApp extends ConsumerWidget {
     final router = ref.watch(routerProvider);
 
     return MaterialApp.router(
-      title: 'TheOttDeals',
+      title: 'MY IPTV',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.build(tv: isTv),
       darkTheme: AppTheme.build(tv: isTv),

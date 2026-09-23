@@ -10,6 +10,7 @@ import '../../data/models/library.dart';
 import '../../services/download/download_manager.dart';
 import '../../services/player/playback_request.dart';
 import '../providers.dart';
+import '../widgets/download_button.dart';
 import '../widgets/network_artwork.dart';
 
 /// Movie details: full-bleed poster, then a dark panel with the title,
@@ -205,27 +206,18 @@ class MovieDetailScreen extends ConsumerWidget {
                             onTap: toggleFavorite,
                           ),
                           const SizedBox(width: Insets.xl),
-                          _Action(
-                            icon: Icons.download_rounded,
-                            label: 'Download',
-                            onTap: () {
-                              final repo =
-                                  ref.read(contentRepositoryProvider);
-                              if (repo == null) return;
-                              ref
-                                  .read(downloadManagerProvider)
-                                  .add(DownloadRequest(
-                                    url: repo.movieUrl(shown),
-                                    title: shown.name,
-                                    ext: shown.ext,
-                                    thumb: shown.poster,
-                                  ));
-                              ScaffoldMessenger.of(context)
-                                ..hideCurrentSnackBar()
-                                ..showSnackBar(const SnackBar(
-                                    content: Text('Added to downloads')));
-                            },
-                          ),
+                          if (ref.watch(contentRepositoryProvider)
+                              case final repo?)
+                            DownloadButton(
+                              url: repo.movieUrl(shown),
+                              showLabel: true,
+                              buildRequest: () => DownloadRequest(
+                                url: repo.movieUrl(shown),
+                                title: shown.name,
+                                ext: shown.ext,
+                                thumb: shown.poster,
+                              ),
+                            ),
                           // Trailer: `get_vod_info` exposes `youtube_trailer`
                           // on some panels only, so the button appears only
                           // when there is actually a trailer to play.

@@ -8,6 +8,10 @@ abstract final class Routes {
   /// The real Xtream Codes credential form.
   static const xtreamLogin = '/login/xtream';
 
+  /// "Please wait while we load your Xtream data" — really downloads the
+  /// catalogue. `extra` is the route to continue to (defaults to Home).
+  static const catalogLoading = '/loading';
+
   /// Saved Xtream accounts + switcher.
   static const accounts = '/accounts';
   static const license = '/license';
