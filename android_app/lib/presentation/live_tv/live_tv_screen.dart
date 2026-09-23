@@ -45,9 +45,12 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
   /// Guards against a burst of channel taps queueing several opens.
   int _switchToken = 0;
 
+  late final bool _isTv;
+
   @override
   void initState() {
     super.initState();
+    _isTv = ref.read(isTvProvider); // ref is unusable in dispose()
     final initial = widget.initialChannel;
     if (initial != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _play(initial));
@@ -61,7 +64,7 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen> {
     // Spec §25: the player and everything it owns goes with the screen.
     unawaited(_player?.dispose());
     unawaited(WakelockPlus.disable());
-    unawaited(AppOrientation.restore(isTv: ref.read(isTvProvider)));
+    unawaited(AppOrientation.restore(isTv: _isTv));
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }

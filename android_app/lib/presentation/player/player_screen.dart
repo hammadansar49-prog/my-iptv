@@ -18,6 +18,7 @@ import '../../services/player/player_controller.dart';
 import '../settings/settings_controller.dart';
 import '../../data/models/content.dart';
 import '../../data/models/library.dart';
+import '../../data/repositories/library_repository_impl.dart';
 import '../providers.dart';
 import '../../services/download/download_manager.dart';
 import '../widgets/download_button.dart';
@@ -64,14 +65,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   Timer? _hideTimer;
   Timer? _historyTicker;
 
+  late final LibraryRepositoryImpl _library;
+  late final bool _isTv;
+
   @override
   void initState() {
     super.initState();
+    // Everything dispose() needs is captured here. Riverpod forbids `ref`
+    // once the widget is being disposed and throws — which aborted dispose()
+    // at its first ref.read: the player was never disposed (audio kept
+    // playing after Back), and the orientation never went back to portrait.
+    _library = ref.read(libraryRepositoryProvider);
+    _isTv = ref.read(isTvProvider);
     WidgetsBinding.instance.addObserver(this);
 
-    _player = PlayerController(
-      guard: ref.read(connectionGuardProvider),
-    )..addListener(_onPlayerChanged);
+    _player = PlayerController(guard: ref.read(connectionGuardProvider))
+      ..addListener(_onPlayerChanged);
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations(const [
@@ -114,29 +123,33 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   Future<void> _start() async {
     // A completed download plays from disk — the remote stream is never
     // requested again (spec §29).
-    final local =
-        ref.read(downloadManagerProvider).localFileFor(widget.request.url);
+    final local = ref
+        .read(downloadManagerProvider)
+        .localFileFor(widget.request.url);
 
     // Resume from the saved position, applied as the stream's start point
     // rather than as a seek after playback begins (AUDIT.md §3).
-    final saved =
-        ref.read(libraryRepositoryProvider).historyFor(widget.request.historyKey);
+    final saved = ref
+        .read(libraryRepositoryProvider)
+        .historyFor(widget.request.historyKey);
     final resumeAt = saved != null && saved.isContinueWatching
         ? saved.resumeAt
         : widget.request.startAt;
 
-    await _player.open(PlaybackRequest(
-      url: widget.request.url,
-      title: widget.request.title,
-      subtitle: widget.request.subtitle,
-      thumb: widget.request.thumb,
-      isLive: widget.request.isLive,
-      historyKey: widget.request.historyKey,
-      startAt: resumeAt,
-      replay: widget.request.replay,
-      section: widget.request.section,
-      localFile: local,
-    ));
+    await _player.open(
+      PlaybackRequest(
+        url: widget.request.url,
+        title: widget.request.title,
+        subtitle: widget.request.subtitle,
+        thumb: widget.request.thumb,
+        isLive: widget.request.isLive,
+        historyKey: widget.request.historyKey,
+        startAt: resumeAt,
+        replay: widget.request.replay,
+        section: widget.request.section,
+        localFile: local,
+      ),
+    );
     unawaited(_resolveNeighbours());
   }
 
@@ -228,13 +241,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final state = _player.state;
     if (state.request == null || state.isLive) return;
     if (state.duration <= Duration.zero) return;
-    unawaited(ref.read(libraryRepositoryProvider).recordProgress(
-          widget.request.toHistoryEntry(),
-          position: state.position,
-          duration: state.duration,
-        ));
+    unawaited(
+      _library.recordProgress(
+        widget.request.toHistoryEntry(),
+        position: state.position,
+        duration: state.duration,
+      ),
+    );
   }
-
 
   /// Hand the stream to whatever external player the device has (VLC, MX
   /// Player, ...) via a normal VIEW intent. Real behaviour, not a decorative
@@ -246,22 +260,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     await _player.pause();
     try {
       final uri = Uri.parse(source);
-      final launched =
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
       if (!launched && mounted) {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
-          ..showSnackBar(const SnackBar(
-            content: Text('No external player is installed to handle this.'),
-          ));
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('No external player is installed to handle this.'),
+            ),
+          );
       }
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(
-          content: Text('Could not open an external player.'),
-        ));
+        ..showSnackBar(
+          const SnackBar(content: Text('Could not open an external player.')),
+        );
     }
   }
 
@@ -287,8 +305,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           children: [
             const Padding(
               padding: EdgeInsets.all(Insets.lg),
-              child: Text('Playback speed',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              child: Text(
+                'Playback speed',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
             ),
             for (final speed in speeds)
               ListTile(
@@ -317,8 +337,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           children: [
             const Padding(
               padding: EdgeInsets.all(Insets.lg),
-              child: Text('Audio',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              child: Text(
+                'Audio',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
             ),
             if (audio.isEmpty)
               const ListTile(title: Text('No audio tracks reported'))
@@ -334,8 +356,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             const Divider(),
             const Padding(
               padding: EdgeInsets.all(Insets.lg),
-              child: Text('Subtitles',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              child: Text(
+                'Subtitles',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
             ),
             if (subtitles.isEmpty)
               const ListTile(title: Text('No subtitle tracks reported'))
@@ -383,28 +407,27 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (index < 0) return;
 
     PlaybackRequest build(Episode e) => PlaybackRequest(
-          url: repo.episodeUrl(e),
-          title: detail.series.name,
-          subtitle: '${e.tag} - ${e.title}',
-          isLive: false,
-          historyKey: e.key,
-          thumb: e.still ?? detail.series.cover,
-          section: ContentSection.series,
-          replay: PlaybackRef(
-            section: ContentSection.series,
-            streamId: e.id,
-            seriesId: detail.series.seriesId,
-            season: e.season,
-            episodeId: e.id,
-            ext: e.ext,
-          ),
-        );
+      url: repo.episodeUrl(e),
+      title: detail.series.name,
+      subtitle: '${e.tag} - ${e.title}',
+      isLive: false,
+      historyKey: e.key,
+      thumb: e.still ?? detail.series.cover,
+      section: ContentSection.series,
+      replay: PlaybackRef(
+        section: ContentSection.series,
+        streamId: e.id,
+        seriesId: detail.series.seriesId,
+        season: e.season,
+        episodeId: e.id,
+        ext: e.ext,
+      ),
+    );
 
     if (!mounted) return;
     setState(() {
       _previous = index > 0 ? build(ordered[index - 1]) : null;
-      _upNext =
-          index + 1 < ordered.length ? build(ordered[index + 1]) : null;
+      _upNext = index + 1 < ordered.length ? build(ordered[index + 1]) : null;
       _upNextResolved = true;
     });
   }
@@ -451,7 +474,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     // Final flush, bypassing the throttle, so the exact stop position sticks.
     _recordProgress();
-    unawaited(ref.read(libraryRepositoryProvider).flushProgress());
+    unawaited(_library.flushProgress());
 
     _player.removeListener(_onPlayerChanged);
     unawaited(_player.dispose());
@@ -462,7 +485,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       unawaited(ScreenBrightness().resetApplicationScreenBrightness());
     } catch (_) {}
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    unawaited(AppOrientation.restore(isTv: ref.read(isTvProvider)));
+    unawaited(AppOrientation.restore(isTv: _isTv));
     super.dispose();
   }
 
@@ -470,166 +493,179 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   Widget build(BuildContext context) {
     final state = _player.state;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Focus(
-        autofocus: true,
-        // Android TV remote (spec §38): D-pad left/right seek, OK toggles
-        // play/pause, back leaves.
-        onKeyEvent: (node, event) {
-          if (event is! KeyDownEvent) return KeyEventResult.ignored;
-          switch (event.logicalKey) {
-            case LogicalKeyboardKey.arrowRight:
-            case LogicalKeyboardKey.mediaFastForward:
-              unawaited(_seekBy(Playback.seekStep));
-              return KeyEventResult.handled;
-            case LogicalKeyboardKey.arrowLeft:
-            case LogicalKeyboardKey.mediaRewind:
-              unawaited(_seekBy(-Playback.seekStep));
-              return KeyEventResult.handled;
-            case LogicalKeyboardKey.select:
-            case LogicalKeyboardKey.enter:
-            case LogicalKeyboardKey.space:
-            case LogicalKeyboardKey.mediaPlayPause:
-              unawaited(_player.playPause());
-              _toggleControls();
-              return KeyEventResult.handled;
-          }
-          return KeyEventResult.ignored;
-        },
-        child: GestureDetector(
-          onTap: _toggleControls,
-          onDoubleTapDown: _locked
-              ? null
-              : (details) {
-                  // Netflix-style double tap: left half rewinds, right half
-                  // fast-forwards.
-                  final width = MediaQuery.sizeOf(context).width;
-                  final forward = details.globalPosition.dx > width / 2;
-                  unawaited(
-                      _seekBy(forward ? Playback.seekStep : -Playback.seekStep));
-                },
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (_player.videoController != null)
-                Video(
-                  controller: _player.videoController!,
-                  controls: NoVideoControls,
-                  fit: _aspect.fit,
-                  aspectRatio: _aspect.ratio ?? _player.displayAspect,
-                ),
+    return PopScope(
+      // Rotate back the moment Back is pressed, not after the route's exit
+      // animation and dispose() — every other app snaps upright instantly.
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) return;
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        unawaited(AppOrientation.restore(isTv: _isTv));
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Focus(
+          autofocus: true,
+          // Android TV remote (spec §38): D-pad left/right seek, OK toggles
+          // play/pause, back leaves.
+          onKeyEvent: (node, event) {
+            if (event is! KeyDownEvent) return KeyEventResult.ignored;
+            switch (event.logicalKey) {
+              case LogicalKeyboardKey.arrowRight:
+              case LogicalKeyboardKey.mediaFastForward:
+                unawaited(_seekBy(Playback.seekStep));
+                return KeyEventResult.handled;
+              case LogicalKeyboardKey.arrowLeft:
+              case LogicalKeyboardKey.mediaRewind:
+                unawaited(_seekBy(-Playback.seekStep));
+                return KeyEventResult.handled;
+              case LogicalKeyboardKey.select:
+              case LogicalKeyboardKey.enter:
+              case LogicalKeyboardKey.space:
+              case LogicalKeyboardKey.mediaPlayPause:
+                unawaited(_player.playPause());
+                _toggleControls();
+                return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          child: GestureDetector(
+            onTap: _toggleControls,
+            onDoubleTapDown: _locked
+                ? null
+                : (details) {
+                    // Netflix-style double tap: left half rewinds, right half
+                    // fast-forwards.
+                    final width = MediaQuery.sizeOf(context).width;
+                    final forward = details.globalPosition.dx > width / 2;
+                    unawaited(
+                      _seekBy(forward ? Playback.seekStep : -Playback.seekStep),
+                    );
+                  },
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (_player.videoController != null)
+                  Video(
+                    controller: _player.videoController!,
+                    controls: NoVideoControls,
+                    fit: _aspect.fit,
+                    aspectRatio: _aspect.ratio ?? _player.displayAspect,
+                  ),
 
-              if (_aspectShown > 0)
-                IgnorePointer(
-                  // Above centre: the middle of the screen is where the
-                  // Play/Pause and ±10 buttons sit, which covered the badge.
-                  child: Align(
-                    alignment: const Alignment(0, -0.45),
-                    child: _AspectBadge(
-                      key: ValueKey(_aspectShown),
-                      label: _aspect.label,
+                if (_aspectShown > 0)
+                  IgnorePointer(
+                    // Above centre: the middle of the screen is where the
+                    // Play/Pause and ±10 buttons sit, which covered the badge.
+                    child: Align(
+                      alignment: const Alignment(0, -0.45),
+                      child: _AspectBadge(
+                        key: ValueKey(_aspectShown),
+                        label: _aspect.label,
+                      ),
                     ),
                   ),
-                ),
 
-              if (state.phase == PlaybackPhase.opening ||
-                  state.phase == PlaybackPhase.buffering)
-                // Dead centre is where the big Play/Pause and ±10 buttons
-                // sit; with the controls up the indicator drew underneath
-                // them. Drop it below that row instead while they show.
-                Align(
-                  alignment: _controlsVisible
-                      ? const Alignment(0, 0.3)
-                      : Alignment.center,
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      SizedBox(width: Insets.md),
-                      Text('Buffering...',
-                          style:
-                              TextStyle(color: Colors.white, fontSize: 16)),
-                    ],
-                  ),
-                ),
-
-              // The mandatory ±10 overlay.
-              SeekFeedbackOverlay(controller: _seekFeedback),
-
-              if (state.phase == PlaybackPhase.failed)
-                _ErrorOverlay(
-                  message: state.error?.message ?? 'Unable to play this stream.',
-                  onRetry: _player.retry,
-                  onBack: () => Navigator.of(context).maybePop(),
-                ),
-
-              if (_upNext != null &&
-                  !_autoplayDismissed &&
-                  state.phase == PlaybackPhase.ended)
-                NextEpisodeCountdown(
-                  title: _upNext!.subtitle.isEmpty
-                      ? _upNext!.title
-                      : _upNext!.subtitle,
-                  onPlay: _playUpNext,
-                  onCancel: () => setState(() => _autoplayDismissed = true),
-                ),
-
-              if (_controlsVisible && state.phase != PlaybackPhase.failed)
-                PlayerControls(
-                  player: _player,
-                  locked: _locked,
-                  title: widget.request.title,
-                  subtitle: widget.request.subtitle,
-                  isSeries:
-                      widget.request.section == ContentSection.series,
-                  brightness: _brightness,
-                  fit: _aspect.fit,
-                  onSeekBy: _seekBy,
-                  onSeekTo: _player.seekTo,
-                  onToggleLock: () => setState(() => _locked = !_locked),
-                  onToggleFit: () => setState(() {
-                    _aspect = VideoAspect.values[
-                        (_aspect.index + 1) % VideoAspect.values.length];
-                    _aspectShown++;
-                  }),
-                  onBack: () => Navigator.of(context).maybePop(),
-                  onInteract: _scheduleHide,
-                  onBrightness: _setBrightness,
-                  onExternalPlayer: _openExternally,
-                  onSpeed: _showSpeedSheet,
-                  onTracks: _showTracksSheet,
-                  onEpisodes:
-                      widget.request.section == ContentSection.series
-                          ? () => Navigator.of(context).maybePop()
-                          : null,
-                  onPrevious: _previous == null
-                      ? null
-                      : () => _playRequest(_previous!),
-                  onNext:
-                      _upNext == null ? null : () => _playRequest(_upNext!),
-                  download: widget.request.isLive
-                      ? null
-                      : DownloadButton(
-                          url: widget.request.url,
-                          diameter: 44,
-                          background: Colors.black.withValues(alpha: 0.45),
-                          buildRequest: () => DownloadRequest(
-                            url: widget.request.url,
-                            title: widget.request.title,
-                            subtitle: widget.request.subtitle,
-                            ext: widget.request.replay?.ext ?? 'mp4',
-                            thumb: widget.request.thumb,
-                            isEpisode: widget.request.section ==
-                                ContentSection.series,
-                          ),
+                if (state.phase == PlaybackPhase.opening ||
+                    state.phase == PlaybackPhase.buffering)
+                  // Dead centre is where the big Play/Pause and ±10 buttons
+                  // sit; with the controls up the indicator drew underneath
+                  // them. Drop it below that row instead while they show.
+                  Align(
+                    alignment: _controlsVisible
+                        ? const Alignment(0, 0.3)
+                        : Alignment.center,
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         ),
-                ),
-            ],
+                        SizedBox(width: Insets.md),
+                        Text(
+                          'Buffering...',
+                          style: TextStyle(color: Colors.white, fontSize: 16),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // The mandatory ±10 overlay.
+                SeekFeedbackOverlay(controller: _seekFeedback),
+
+                if (state.phase == PlaybackPhase.failed)
+                  _ErrorOverlay(
+                    message:
+                        state.error?.message ?? 'Unable to play this stream.',
+                    onRetry: _player.retry,
+                    onBack: () => Navigator.of(context).maybePop(),
+                  ),
+
+                if (_upNext != null &&
+                    !_autoplayDismissed &&
+                    state.phase == PlaybackPhase.ended)
+                  NextEpisodeCountdown(
+                    title: _upNext!.subtitle.isEmpty
+                        ? _upNext!.title
+                        : _upNext!.subtitle,
+                    onPlay: _playUpNext,
+                    onCancel: () => setState(() => _autoplayDismissed = true),
+                  ),
+
+                if (_controlsVisible && state.phase != PlaybackPhase.failed)
+                  PlayerControls(
+                    player: _player,
+                    locked: _locked,
+                    title: widget.request.title,
+                    subtitle: widget.request.subtitle,
+                    isSeries: widget.request.section == ContentSection.series,
+                    brightness: _brightness,
+                    fit: _aspect.fit,
+                    onSeekBy: _seekBy,
+                    onSeekTo: _player.seekTo,
+                    onToggleLock: () => setState(() => _locked = !_locked),
+                    onToggleFit: () => setState(() {
+                      _aspect =
+                          VideoAspect.values[(_aspect.index + 1) %
+                              VideoAspect.values.length];
+                      _aspectShown++;
+                    }),
+                    onBack: () => Navigator.of(context).maybePop(),
+                    onInteract: _scheduleHide,
+                    onBrightness: _setBrightness,
+                    onExternalPlayer: _openExternally,
+                    onSpeed: _showSpeedSheet,
+                    onTracks: _showTracksSheet,
+                    onEpisodes: widget.request.section == ContentSection.series
+                        ? () => Navigator.of(context).maybePop()
+                        : null,
+                    onPrevious: _previous == null
+                        ? null
+                        : () => _playRequest(_previous!),
+                    onNext: _upNext == null
+                        ? null
+                        : () => _playRequest(_upNext!),
+                    download: widget.request.isLive
+                        ? null
+                        : DownloadButton(
+                            url: widget.request.url,
+                            diameter: 44,
+                            background: Colors.black.withValues(alpha: 0.45),
+                            buildRequest: () => DownloadRequest(
+                              url: widget.request.url,
+                              title: widget.request.title,
+                              subtitle: widget.request.subtitle,
+                              ext: widget.request.replay?.ext ?? 'mp4',
+                              thumb: widget.request.thumb,
+                              isEpisode:
+                                  widget.request.section ==
+                                  ContentSection.series,
+                            ),
+                          ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -657,8 +693,11 @@ class _ErrorOverlay extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.error_outline_rounded,
-              color: AppColors.danger, size: 40),
+          const Icon(
+            Icons.error_outline_rounded,
+            color: AppColors.danger,
+            size: 40,
+          ),
           const SizedBox(height: Insets.lg),
           // Plain text only — never a stack trace or raw HTML (spec §24).
           Text(
@@ -736,8 +775,8 @@ class _AspectBadgeState extends State<_AspectBadge>
         final opacity = t < 0.15
             ? t / 0.15
             : t > 0.75
-                ? (1 - t) / 0.25
-                : 1.0;
+            ? (1 - t) / 0.25
+            : 1.0;
         final scale = t < 0.15
             ? 0.8 + 0.2 * Curves.easeOutBack.transform(t / 0.15)
             : 1.0;
