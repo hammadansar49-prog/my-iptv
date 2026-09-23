@@ -22,10 +22,6 @@ object DownloadBridge {
             val context = appContext ?: activity?.applicationContext
             try {
                 when (call.method) {
-                    "requestPermission" -> {
-                        activity?.requestNotificationPermission()
-                        result.success(null)
-                    }
                     "start", "update" -> {
                         if (context == null) { result.error("no_context", null, null); return@setMethodCallHandler }
                         val i = Intent(context, DownloadService::class.java).apply {

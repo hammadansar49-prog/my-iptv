@@ -6,6 +6,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/logger.dart';
 import '../../data/api/rtdb_api.dart';
+import '../../services/player/pip_service.dart';
 import '../providers.dart';
 import 'iptv_live_controller.dart';
 
@@ -40,7 +41,14 @@ class _IptvLiveLayerState extends ConsumerState<IptvLiveLayer> {
       fit: StackFit.expand,
       children: [
         widget.child,
-        Overlay(initialEntries: [_entry]),
+        // In Picture-in-Picture the window shows only the video: no
+        // announcement or update surfaces over it. Offstage keeps their state.
+        ValueListenableBuilder<bool>(
+          valueListenable: PipService.inPip,
+          builder: (context, pip, child) =>
+              Offstage(offstage: pip, child: child),
+          child: Overlay(initialEntries: [_entry]),
+        ),
       ],
     );
   }

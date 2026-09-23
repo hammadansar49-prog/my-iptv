@@ -14,6 +14,7 @@ import '../../core/storage/local_store.dart';
 import '../../core/utils/logger.dart';
 import '../../data/models/library.dart';
 import 'download_service_bridge.dart';
+import 'gallery_bridge.dart';
 
 /// Metadata for a new download request.
 class DownloadRequest {
@@ -69,7 +70,9 @@ class DownloadManager {
     required ConnectionGuard guard,
     Dio? dio,
     DownloadServiceBridge? service,
+    GalleryBridge? gallery,
   })  : _store = store,
+        _gallery = gallery ?? GalleryBridge(),
         _guard = guard,
         _dio = dio ?? _makeDio(),
         _service = service ?? DownloadServiceBridge() {
@@ -104,6 +107,7 @@ class DownloadManager {
   final ConnectionGuard _guard;
   final Dio _dio;
   final DownloadServiceBridge _service;
+  final GalleryBridge _gallery;
 
   late List<DownloadItem> _items;
   String? _rootDir;
@@ -214,7 +218,6 @@ class DownloadManager {
   // ---- Queue operations ---------------------------------------------------
 
   Future<DownloadItem> add(DownloadRequest request) async {
-    unawaited(_service.ensureNotificationPermission());
     final existing = _items.firstWhereOrNull(
       (it) => it.url == request.url && it.status != DownloadStatus.failed,
     );
@@ -284,7 +287,6 @@ class DownloadManager {
         item.status == DownloadStatus.downloading) {
       return;
     }
-    unawaited(_service.ensureNotificationPermission());
     _netFailed.remove(id);
     _update(id, (it) => it.copyWith(status: DownloadStatus.queued, error: ''));
     unawaited(_pump());
@@ -298,6 +300,9 @@ class DownloadManager {
     await _deleteQuietly(item.partPath);
     if (deleteFile || item.status != DownloadStatus.completed) {
       await _deleteQuietly(item.filePath);
+      // A Gallery copy the plain delete could not remove (not owned by this
+      // install) goes through MediaStore.
+      if (File(item.filePath).existsSync()) await _gallery.delete(item.filePath);
     }
     _items.removeWhere((it) => it.id == id);
     _speeds.remove(id);
@@ -618,6 +623,7 @@ class DownloadManager {
         ),
       );
       Log.i(_tag, 'completed "${item.title}"');
+      unawaited(_publishToGallery(id));
     } catch (e) {
       _update(id, (it) => it.copyWith(
             status: DownloadStatus.failed,
@@ -626,6 +632,28 @@ class DownloadManager {
     }
     if (_notifId == id) _notifId = null;
     unawaited(_pump());
+  }
+
+  /// Move the finished file into the Gallery (Movies/MY IPTV) and point the
+  /// item at it, so the video is stored once and still plays from Downloads.
+  /// Only ever runs on a completed file — the .part resume path never sees
+  /// it. The item is already `completed` on its private path first, so a
+  /// kill mid-copy leaves a playable download, never a re-download.
+  Future<void> _publishToGallery(String id) async {
+    final item = _find(id);
+    if (item == null || item.status != DownloadStatus.completed) return;
+    final title = item.isEpisode && item.subtitle.isNotEmpty
+        ? '${item.title} - ${item.subtitle}'
+        : item.title;
+    final published = await _gallery.publish(item.filePath, title: title);
+    if (published == null || published == item.filePath) return;
+    if (_find(id) == null) {
+      // Removed while copying: don't leave an orphan in the Gallery.
+      await _gallery.delete(published);
+      return;
+    }
+    _update(id, (it) => it.copyWith(filePath: published));
+    Log.i(_tag, 'published "${item.title}" to the Gallery');
   }
 
   Future<void> _stopActive(DownloadStatus? nextStatus) async {

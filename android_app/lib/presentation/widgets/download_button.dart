@@ -6,6 +6,7 @@ import '../../core/theme/app_colors.dart';
 import '../../data/models/library.dart';
 import '../../services/download/download_manager.dart';
 import '../providers.dart';
+import 'gallery_permission.dart';
 
 enum _Phase { idle, pending, running, paused, done }
 
@@ -67,6 +68,8 @@ class DownloadButton extends ConsumerWidget {
       HapticFeedback.selectionClick();
       switch (phase) {
         case _Phase.idle:
+          // Finished downloads go to the Gallery: no media access, no download.
+          if (!await ensureGalleryPermission(context)) return;
           await manager.add(buildRequest());
           final guard = ref.read(connectionGuardProvider);
           // On a one-connection account the provider refuses a second

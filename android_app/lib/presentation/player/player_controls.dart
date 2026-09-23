@@ -35,6 +35,7 @@ class PlayerControls extends StatelessWidget {
     this.onPrevious,
     this.onNext,
     this.download,
+    this.onPip,
   });
 
   final PlayerController player;
@@ -60,6 +61,9 @@ class PlayerControls extends StatelessWidget {
 
   /// Download control for the current title (VOD only).
   final Widget? download;
+
+  /// Picture-in-Picture; null where the device has none.
+  final VoidCallback? onPip;
 
   static String formatTime(Duration d) {
     final h = d.inHours.toString().padLeft(2, '0');
@@ -112,6 +116,13 @@ class PlayerControls extends StatelessWidget {
                   RoundPlayerButton(
                       icon: Icons.arrow_back_rounded, onTap: onBack),
                   const Spacer(),
+                  if (onPip != null) ...[
+                    RoundPlayerButton(
+                      icon: Icons.picture_in_picture_alt_rounded,
+                      onTap: onPip!,
+                    ),
+                    const SizedBox(width: Insets.sm),
+                  ],
                   if (download != null) ...[
                     download!,
                     const SizedBox(width: Insets.sm),

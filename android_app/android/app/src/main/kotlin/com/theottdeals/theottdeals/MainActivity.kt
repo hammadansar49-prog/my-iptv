@@ -1,11 +1,10 @@
 package com.theottdeals.theottdeals
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
+import android.content.res.Configuration
 import android.os.Bundle
+import androidx.lifecycle.Lifecycle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
@@ -28,6 +27,9 @@ class MainActivity : FlutterActivity() {
         val engine = FlutterEngine(context.applicationContext)
         DownloadBridge.setContext(context)
         DownloadBridge.attach(engine)
+        PipBridge.attach(engine)
+        PermissionBridge.attach(engine, context)
+        GalleryBridge.attach(engine, context)
         // Dart pulls a pending announcement-notification tap on start/resume.
         MethodChannel(engine.dartExecutor.binaryMessenger, ANNOUNCEMENT_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -48,9 +50,12 @@ class MainActivity : FlutterActivity() {
         // Before super: the (possibly already running) engine may ask for it
         // as soon as it attaches.
         captureAnnouncementTap(intent)
+        PipBridge.activity = this
+        PermissionBridge.activity = this
         super.onCreate(savedInstanceState)
         AnnouncementNotifier.schedule(this)
-        requestNotificationPermission()
+        // No permission prompt at launch: notifications are asked for from
+        // the in-app onboarding screen, media access at the first download.
     }
 
     // singleTop: a notification tap on a running app lands here, then
@@ -72,6 +77,8 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         DownloadBridge.activity = this
+        PipBridge.activity = this
+        PermissionBridge.activity = this
         AnnouncementNotifier.appVisible = true
     }
 
@@ -82,16 +89,36 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         if (DownloadBridge.activity === this) DownloadBridge.activity = null
+        if (PipBridge.activity === this) PipBridge.activity = null
+        if (PermissionBridge.activity === this) PermissionBridge.activity = null
         super.onDestroy()
     }
 
-    fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7301)
-        }
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        PermissionBridge.onResult(requestCode)
+    }
+
+    // Home while a video plays (below API 31; 31+ auto-enters from the params).
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        PipBridge.onUserLeaveHint()
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        // Leaving PiP while the Activity is no longer started means the user
+        // closed the window (X / swipe away) rather than expanding it.
+        val dismissed = !isInPictureInPictureMode &&
+            !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        PipBridge.onModeChanged(isInPictureInPictureMode, dismissed)
     }
 
     companion object {

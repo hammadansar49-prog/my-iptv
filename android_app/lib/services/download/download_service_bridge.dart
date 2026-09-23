@@ -23,7 +23,6 @@ class DownloadServiceBridge {
   void Function(String action, String id)? onAction;
 
   bool _running = false;
-  bool _askedPermission = false;
   String? _lastSig;
 
   Future<dynamic> _onCall(MethodCall call) async {
@@ -32,17 +31,6 @@ class DownloadServiceBridge {
       onAction?.call('${args['action']}', '${args['id']}');
     }
     return null;
-  }
-
-  /// Android 13+: ask once, at the first download.
-  Future<void> ensureNotificationPermission() async {
-    if (!Platform.isAndroid || _askedPermission) return;
-    _askedPermission = true;
-    try {
-      await _channel.invokeMethod('requestPermission');
-    } catch (e) {
-      Log.w(_tag, 'permission request failed: $e');
-    }
   }
 
   /// Start (or refresh) the foreground notification.

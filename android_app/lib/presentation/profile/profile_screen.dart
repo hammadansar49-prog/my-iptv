@@ -9,6 +9,8 @@ import '../../core/theme/app_theme.dart';
 import '../auth/auth_controller.dart';
 import '../iptv_live/iptv_live_layer.dart';
 import '../providers.dart';
+import '../notifications/notification_onboarding.dart';
+import '../../services/permissions/permission_service.dart';
 
 /// Account summary modelled on the design screenshot: avatar + status pill,
 /// then a grid of subscription facts. Every value comes from the panel's real
@@ -283,6 +285,11 @@ class ProfileScreen extends ConsumerWidget {
                   padding: EdgeInsets.only(left: 68),
                   child: Divider(height: 1),
                 ),
+                const _NotificationsRow(),
+                const Padding(
+                  padding: EdgeInsets.only(left: 68),
+                  child: Divider(height: 1),
+                ),
                 _SettingsRow(
                   icon: Icons.system_update_rounded,
                   color: AppColors.tileGreen,
@@ -424,6 +431,62 @@ class _StatTile extends StatelessWidget {
                   color: AppColors.textSecondary, fontSize: 12)),
         ],
       ),
+    );
+  }
+}
+
+class _NotificationsRow extends StatefulWidget {
+  const _NotificationsRow();
+
+  @override
+  State<_NotificationsRow> createState() => _NotificationsRowState();
+}
+
+/// Live notification status; re-read when the user comes back from the
+/// system settings page.
+class _NotificationsRowState extends State<_NotificationsRow>
+    with WidgetsBindingObserver {
+  AppPermissionStatus? _status;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final s = await PermissionService.status(AppPermission.notifications);
+    if (mounted) setState(() => _status = s);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = _status;
+    return _SettingsRow(
+      icon: s == AppPermissionStatus.granted
+          ? Icons.notifications_active_rounded
+          : Icons.notifications_off_rounded,
+      color: AppColors.tileYellow,
+      title: 'Notifications',
+      subtitle: s == null
+          ? 'Announcements and download progress.'
+          : NotificationSettingsAction.describe(s),
+      onTap: () async {
+        await NotificationSettingsAction.run();
+        await _refresh();
+      },
     );
   }
 }

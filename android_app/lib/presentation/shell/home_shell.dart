@@ -8,6 +8,7 @@ import '../../core/theme/app_theme.dart';
 import '../downloads/downloads_screen.dart';
 import '../epg/epg_screen.dart';
 import '../home/home_screen.dart';
+import '../notifications/notification_onboarding.dart';
 import '../profile/profile_screen.dart';
 import '../../services/player/player_controller.dart';
 import '../providers.dart';
@@ -28,6 +29,19 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell> {
   int _index = 0;
   late final List<bool> _visited = [true, false, false, false];
+
+  @override
+  void initState() {
+    super.initState();
+    // First open after bootstrap only (remembered in LocalStore): explain
+    // notifications before the system is ever asked.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        maybeShowNotificationOnboarding(context, ref.read(localStoreProvider)),
+      );
+    });
+  }
 
   static const _tabs = <_TabSpec>[
     _TabSpec('Home', Icons.home_outlined, Icons.home_rounded),

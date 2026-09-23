@@ -15,6 +15,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/player/playback_request.dart';
 import '../../services/player/player_controller.dart';
+import '../../services/player/pip_service.dart';
 import '../settings/settings_controller.dart';
 import '../../data/models/content.dart';
 import '../../data/models/library.dart';
@@ -69,6 +70,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   late final LibraryRepositoryImpl _library;
   late final bool _isTv;
 
+  /// Picture-in-Picture: available on this device, and currently in it.
+  bool _pipSupported = false;
+  bool _inPip = false;
+
   @override
   void initState() {
     super.initState();
@@ -82,6 +87,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     _player = PlayerController(guard: ref.read(connectionGuardProvider))
       ..addListener(_onPlayerChanged);
+
+    PipService.inPip.addListener(_onPipChanged);
+    PipService.onDismissed = _onPipDismissed;
+    unawaited(PipService.isSupported().then((ok) {
+      if (!mounted || ok == _pipSupported) return;
+      setState(() => _pipSupported = ok);
+      _syncPip();
+    }));
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations(const [
@@ -156,10 +169,60 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   void _onPlayerChanged() {
     if (!mounted) return;
+    _syncPip();
     if (_player.state.phase == PlaybackPhase.ended) {
       unawaited(_resolveUpNext());
     }
     setState(() {});
+  }
+
+  /// The video's shape for the PiP window. Unknown yet → 16:9.
+  double get _pipAspect => _player.displayAspect ?? 16 / 9;
+
+  /// Keep the native PiP params current: auto-enter on Home only while the
+  /// video actually plays, and a window matching the picture.
+  void _syncPip() {
+    if (!_pipSupported) return;
+    final phase = _player.state.phase;
+    final playing =
+        phase == PlaybackPhase.playing || phase == PlaybackPhase.buffering;
+    unawaited(PipService.configure(autoEnter: playing, aspect: _pipAspect));
+  }
+
+  Future<void> _enterPip() async {
+    // Sheets/dialogs (speed, tracks) would fill the tiny window; close them.
+    Navigator.of(context).popUntil((route) => route is! PopupRoute);
+    setState(() => _controlsVisible = false);
+    _hideTimer?.cancel();
+    await PipService.enter(aspect: _pipAspect);
+  }
+
+  void _onPipChanged() {
+    if (!mounted) return;
+    final pip = PipService.inPip.value;
+    if (pip == _inPip) return;
+    setState(() {
+      _inPip = pip;
+      _controlsVisible = false;
+    });
+    if (!pip) {
+      // Expanded back: same player, same position — only restore the
+      // fullscreen landscape chrome.
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
+  }
+
+  /// The PiP window was closed (X): stop playback, release the provider
+  /// connection and leave the player.
+  Future<void> _onPipDismissed() async {
+    if (!mounted) return;
+    _recordProgress();
+    await _player.stop();
+    if (mounted) Navigator.of(context).maybePop();
   }
 
   /// Find the next episode in playback order. Only meaningful for series,
@@ -385,6 +448,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Backgrounding releases the provider connection; a one-connection
     // account cannot afford to hold it while the app is not visible.
+    // In PiP the video keeps playing in its window.
+    if (PipService.inPip.value) return;
     if (state == AppLifecycleState.paused) {
       _recordProgress();
       unawaited(_player.pause());
@@ -418,6 +483,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    PipService.inPip.removeListener(_onPipChanged);
+    if (PipService.onDismissed == _onPipDismissed) PipService.onDismissed = null;
+    unawaited(PipService.configure(autoEnter: false));
     _hideTimer?.cancel();
     _historyTicker?.cancel();
 
@@ -501,6 +569,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                     aspectRatio: _aspect.ratio ?? _player.displayAspect,
                   ),
 
+                // In PiP only the video is drawn: no controls or overlays.
+                if (!_inPip) ...[
                 if (_aspectShown > 0)
                   IgnorePointer(
                     // Above centre: the middle of the screen is where the
@@ -595,6 +665,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                     onNext: _upNext == null
                         ? null
                         : () => _playRequest(_upNext!),
+                    onPip: _pipSupported ? _enterPip : null,
                     download: widget.request.isLive
                         ? null
                         : DownloadButton(
@@ -613,6 +684,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                             ),
                           ),
                   ),
+                ],
               ],
             ),
           ),
