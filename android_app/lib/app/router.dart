@@ -9,6 +9,8 @@ import '../presentation/auth/setup_screen.dart';
 import '../presentation/auth/splash_screen.dart';
 import '../presentation/favorites/favorites_screen.dart';
 import '../presentation/live_tv/live_tv_screen.dart';
+import '../presentation/license/license_screen.dart';
+import '../presentation/license/plans_screen.dart';
 import '../presentation/loading/catalog_loading_screen.dart';
 import '../presentation/movies/movie_detail_screen.dart';
 import '../presentation/movies/movies_screen.dart';
@@ -51,6 +53,16 @@ GoRouter buildRouter(Ref ref) {
         builder: (context, state) => CatalogLoadingScreen(
           next: state.extra is String ? state.extra as String : Routes.home,
         ),
+      ),
+      GoRoute(
+        path: Routes.license,
+        builder: (context, state) => LicenseScreen(
+          next: state.extra is String ? state.extra as String : Routes.home,
+        ),
+      ),
+      GoRoute(
+        path: Routes.plans,
+        builder: (context, state) => const PlansScreen(),
       ),
       GoRoute(
         path: Routes.accounts,

@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../../app/routes.dart';
 import '../../core/errors/app_error.dart';
 import '../../core/theme/app_colors.dart';
+import '../license/license_state.dart';
 import 'catalog_load_controller.dart';
 import 'rocket_scene.dart';
 
@@ -52,6 +53,12 @@ class _CatalogLoadingScreenState extends ConsumerState<CatalogLoadingScreen> {
   void _continue() {
     if (_leaving || !mounted) return;
     _leaving = true;
+    // Licence gate: every entry (login, restored session, account switch)
+    // passes through here, so this is the one place to check it.
+    if (!ref.read(licenseStatusProvider).activeNow) {
+      context.go(Routes.license, extra: widget.next);
+      return;
+    }
     context.go(widget.next);
   }
 

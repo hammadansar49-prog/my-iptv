@@ -13,6 +13,7 @@ import '../../core/theme/app_theme.dart';
 import '../../data/models/content.dart';
 import '../../data/models/library.dart';
 import '../auth/auth_controller.dart';
+import '../license/license_widgets.dart';
 import '../providers.dart';
 import '../widgets/network_artwork.dart';
 import 'home_feed.dart';
@@ -318,7 +319,10 @@ class _TitleBar extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Expanded(child: Text('MY IPTV', style: title)),
+              Text('MY IPTV', style: title),
+              const SizedBox(width: 10),
+              const Flexible(child: LicenseBadge()),
+              const Spacer(),
               ValueListenableBuilder<bool>(
                 valueListenable: searchOffscreen,
                 builder: (context, show, child) => ExcludeFocus(
@@ -666,6 +670,19 @@ class _FeaturedCard extends ConsumerWidget {
                     begin: Alignment.center,
                     end: Alignment.bottomCenter,
                     colors: [Colors.transparent, Color(0xE6000000)],
+                  ),
+                ),
+              ),
+
+              // Tapping the poster itself opens the title's page, like the
+              // Play button. Below the buttons in the stack, so Play and My
+              // List still get their own taps.
+              Positioned.fill(
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: InkWell(
+                    onTap: () => _play(context, ref),
+                    splashColor: Colors.white10,
                   ),
                 ),
               ),

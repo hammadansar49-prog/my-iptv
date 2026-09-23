@@ -104,8 +104,12 @@ slow/unstable connection.
   `builder` (above the Navigator, so it covers the fullscreen player). Announcements show once per
   `created_at` (LocalStore `lastSeenAnnouncementAt`); feedback goes to
   `iptv/announcement_reviews/<ms>_<8hex>` in the PC app's exact shape. Updates apply only when
-  `platform` is `android`/`all` (missing = pc); Profile → "Check Updates" does a fresh GET. No
-  licence stored = app behaves exactly as before; there is intentionally no key-entry gate yet.
+  `platform` is `android`/`all` (missing = pc); Profile → "Check Updates" does a fresh GET.
+- **Licence gate / badge / plans** (`lib/presentation/license/`): `CatalogLoadingScreen._continue`
+  (every login/restore/account-switch passes through it) routes to `/license` when
+  `licenseStatusProvider` (stored licence + `iptvLiveProvider` key stream) is not active. Home
+  header shows `LicenseBadge` (yellow FREE TRIAL countdown / red PRO days-left) → `/plans`. Plan
+  "Activate Plan" first reads `iptv/keys/<KEY>` and rejects a key whose `duration_days` differs.
 - **Announcement notifications while closed/backgrounded**: native Kotlin, no Dart in the
   background (`AnnouncementNotifier.kt`). `AnnouncementWorker` (WorkManager, 15 min, network
   constraint, scheduled from `MainActivity.onCreate` with KEEP) GETs `iptv/announcement.json`;

@@ -62,6 +62,18 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
   String? get whatsappNumber => _whatsappNumber;
   String? _whatsappNumber;
 
+  /// Admin-editable WhatsApp message (`{plan}`/`{price}`/`{duration}`).
+  String? get messageTemplate => _messageTemplate;
+  String? _messageTemplate;
+
+  /// Live `expires_at` / `duration_days` of the streamed stored key, so an
+  /// admin extension shows up in the badge without a re-verify.
+  int? get liveKeyExpiresAt => _liveKeyExpiresAt;
+  int? _liveKeyExpiresAt;
+  int? get liveKeyDurationDays => _liveKeyDurationDays;
+  int? _liveKeyDurationDays;
+  String? get streamedKey => _streamedKey;
+
   /// True while a stored licence is revoked/expired — drives the blocking
   /// "Subscription ended" screen. Lifts itself if the admin restores it.
   bool get licenseBlocked => _licenseBlocked;
@@ -231,6 +243,7 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
     _whatsappNumber = asStringOrNull(s['whatsappNumber']) ??
         asStringOrNull(s['whatsapp']) ??
         asStringOrNull(s['whatsapp_number']);
+    _messageTemplate = asStringOrNull(s['message_template']);
     notifyListeners();
   }
 
@@ -271,6 +284,8 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
     _keyStream?.stop();
     _keyStream = null;
     _streamedKey = null;
+    _liveKeyExpiresAt = null;
+    _liveKeyDurationDays = null;
   }
 
   /// Same rule as main.js handleLicenseStreamEvent: a deleted row counts as
@@ -284,6 +299,12 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
     }
     final status = asString(raw['status']);
     final exp = asInt(raw['expires_at']);
+    final days = asIntOrNull(raw['duration_days']);
+    if (exp != _liveKeyExpiresAt || days != _liveKeyDurationDays) {
+      _liveKeyExpiresAt = exp > 0 ? exp : null;
+      _liveKeyDurationDays = days;
+      notifyListeners();
+    }
     if (status != 'active' || exp <= 0) {
       _expiryTimer?.cancel();
       _setBlocked(true);

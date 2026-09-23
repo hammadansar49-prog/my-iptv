@@ -130,8 +130,22 @@ class LicenseRepositoryImpl implements LicenseRepository {
     return fresh;
   }
 
+  /// Enabled plans, ordered by `sort_order` then duration (as the PC app).
   @override
-  Future<List<SubscriptionPlan>> plans() => _api.plans();
+  Future<List<SubscriptionPlan>> plans() async {
+    final list = [...await _api.plans()];
+    list.sort((a, b) {
+      final o = a.sortOrder.compareTo(b.sortOrder);
+      return o != 0 ? o : a.durationDays.compareTo(b.durationDays);
+    });
+    return list;
+  }
+
+  /// Read-only look at a key row (no activation, no device slot).
+  Future<Map<String, dynamic>?> keyRow(String key) => _api.keyRow(key);
+
+  /// `iptv/settings` — WhatsApp number and message template.
+  Future<Map<String, dynamic>> settings() => _api.settings();
 
   @override
   Future<TrialConfig> trialConfig() => _api.trialConfig();

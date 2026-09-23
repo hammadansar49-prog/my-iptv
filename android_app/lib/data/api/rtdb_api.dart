@@ -67,6 +67,7 @@ class SubscriptionPlan {
     this.specs = const [],
     this.enabled = true,
     this.durationDays = 0,
+    this.sortOrder = 0,
   });
 
   final String id;
@@ -76,6 +77,16 @@ class SubscriptionPlan {
   final List<String> specs;
   final bool enabled;
   final int durationDays;
+
+  /// Admin-set display order (`sort_order`); ties fall back to duration.
+  final int sortOrder;
+
+  /// `12.99 EUR` / `12.99$` — same rule as renderer.js formatPrice.
+  String get priceLabel {
+    final c = currency.trim();
+    if (c.toUpperCase() == 'USD') return '$price\$';
+    return c.isEmpty ? price : '$price $c';
+  }
 
   factory SubscriptionPlan.fromJson(String id, Map<String, dynamic> j) {
     final rawSpecs = j['specs'];
@@ -94,6 +105,7 @@ class SubscriptionPlan {
       specs: specs,
       enabled: asBool(j['enabled'], true),
       durationDays: asInt(j['duration_days']),
+      sortOrder: asInt(j['sort_order']),
     );
   }
 }
@@ -417,6 +429,16 @@ class RtdbApi {
       plan: plan,
       expiresAt: asUnixMillis(row['expires_at']),
     );
+  }
+
+  /// Raw `iptv/keys/<key>` row, read-only; null when it does not exist.
+  /// Throws [AppError] when offline so callers can tell the two apart.
+  Future<Map<String, dynamic>?> keyRow(String key) async {
+    final trimmed = key.trim();
+    if (trimmed.isEmpty) return null;
+    final raw =
+        await _request('GET', '/iptv/keys/${Uri.encodeComponent(trimmed)}');
+    return raw is Map ? raw.cast<String, dynamic>() : null;
   }
 
   /// Port of `checkKeyStatusOnly`. Read-only by design: the frequent
