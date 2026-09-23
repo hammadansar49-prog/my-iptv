@@ -21,7 +21,7 @@ class ProfileScreen extends ConsumerWidget {
     final session = ref.watch(sessionProvider);
     final user = session?.userInfo;
     final text = Theme.of(context).textTheme;
-    final dateFmt = DateFormat('EEE, MMM d, y');
+    final dateFmt = DateFormat('MMM d, y');
 
     // Real catalogue counts — the same providers Home already loads, so
     // this costs nothing extra once Home has been visited once.
@@ -29,13 +29,17 @@ class ProfileScreen extends ConsumerWidget {
     final seriesCount = ref.watch(seriesProvider('')).valueOrNull?.length;
     final liveCount = ref.watch(liveChannelsProvider('')).valueOrNull?.length;
 
+    // Top: below the status bar. Bottom: clear of the floating nav bar the
+    // shell draws over this tab (extendBody) — without both, the title sat
+    // inside the status bar and the last settings rows hid under the bar.
+    final pad = MediaQuery.paddingOf(context);
     return Scaffold(
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(
+        padding: EdgeInsets.fromLTRB(
           Insets.lg,
-          Insets.sm,
+          pad.top + Insets.sm,
           Insets.lg,
-          Insets.xxl * 3,
+          pad.bottom + 110,
         ),
         children: [
           Row(

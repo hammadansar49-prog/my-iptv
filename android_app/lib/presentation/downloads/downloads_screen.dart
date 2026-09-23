@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -13,7 +13,7 @@ import '../widgets/network_artwork.dart';
 import 'empty_downloads_art.dart';
 
 /// Downloads grouped into Downloading / Paused / Completed / Failed
-/// (spec §27), each row showing progress, size, speed and its controls.
+/// (spec Â§27), each row showing progress, size, speed and its controls.
 class DownloadsScreen extends ConsumerWidget {
   const DownloadsScreen({super.key});
 
@@ -63,8 +63,9 @@ class DownloadsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Downloads')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(
-            Insets.lg, 0, Insets.lg, Insets.xxl * 3),
+        // Clear of the shell's floating nav bar.
+        padding: EdgeInsets.fromLTRB(Insets.lg, 0, Insets.lg,
+            MediaQuery.paddingOf(context).bottom + 110),
         children: [
           if (downloading.isNotEmpty)
             _Group(title: 'Downloading', items: downloading),
@@ -106,7 +107,7 @@ class _DownloadRow extends ConsumerWidget {
   final DownloadItem item;
 
   static String _bytes(int b) {
-    if (b <= 0) return '—';
+    if (b <= 0) return 'â€”';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     var value = b.toDouble();
     var unit = 0;
@@ -145,7 +146,7 @@ class _DownloadRow extends ConsumerWidget {
                     Routes.player,
                     extra: PlaybackRequest(
                       // A completed download plays from disk; the remote
-                      // stream is never requested again (spec §29).
+                      // stream is never requested again (spec Â§29).
                       url: item.url,
                       localFile: item.filePath,
                       title: item.title,
@@ -212,14 +213,14 @@ class _DownloadRow extends ConsumerWidget {
                           DownloadStatus.failed =>
                             item.error.isEmpty ? 'Failed' : item.error,
                           DownloadStatus.waiting =>
-                            'Waiting — something is playing',
+                            'Waiting â€” something is playing',
                           DownloadStatus.queued => 'Queued',
                           DownloadStatus.paused =>
-                            '${_bytes(item.receivedBytes)} of ${_bytes(item.totalBytes)} · Paused',
+                            '${_bytes(item.receivedBytes)} of ${_bytes(item.totalBytes)} Â· Paused',
                           DownloadStatus.downloading =>
                             '${_bytes(item.receivedBytes)} of ${_bytes(item.totalBytes)}'
-                                '${speed > 0 ? ' · ${_bytes(speed.round())}/s' : ''}'
-                                '${eta != null ? ' · ${_eta(eta)}' : ''}',
+                                '${speed > 0 ? ' Â· ${_bytes(speed.round())}/s' : ''}'
+                                '${eta != null ? ' Â· ${_eta(eta)}' : ''}',
                         },
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
