@@ -74,6 +74,10 @@ slow/unstable connection.
   decoding. This was added because hardware decoding produced a black frame with audio still
   playing on a real test device (not just an emulator) — a known media_kit/Android issue. Don't
   remove it without confirming hardware decode actually renders on real hardware first.
+- **Resume (Android)** does NOT use `Media(start:)`: on the real panel, opening at an offset made
+  mpv treat the movie as an unseekable stream with no duration that played from 0:00 (reproduced
+  on-device). `PlayerController` opens normally and seeks to `_pendingStart` once the duration is
+  known, hiding the early positions so they never overwrite the Continue Watching point.
 - **Live TV** (`live_tv_screen.dart`) plays inline (YouTube-style: video on top, channel list
   below, same `Player` instance reused when switching channels — no reload) with a separate
   fullscreen/landscape mode toggled in place, not a route change. Home tab, EPG tab, and Favorites

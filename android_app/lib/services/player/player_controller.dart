@@ -206,9 +206,8 @@ class PlayerController extends ChangeNotifier {
       if (pending != null) {
         if (DateTime.now().isAfter(_pendingUntil) || _pendingTries >= 3) {
           _pendingStart = null;
-        } else if (position < pending - const Duration(seconds: 10)) {
-          if (position > const Duration(milliseconds: 300) &&
-              player.state.duration > Duration.zero) {
+        } else if (position < pending - const Duration(seconds: 4)) {
+          if (player.state.duration > Duration.zero && !_seekInFlight) {
             _pendingTries++;
             Log.i(_tag, 'start ignored by engine; seeking to $pending');
             _pendingSeekTarget = pending;
@@ -338,18 +337,19 @@ class PlayerController extends ChangeNotifier {
   Future<void> _openMedia(PlaybackRequest request, int generation) async {
     final player = _player;
     if (player == null) return;
-    _pendingStart = !request.isLive && request.startAt > const Duration(seconds: 10)
+    _pendingStart = !request.isLive && request.startAt > const Duration(seconds: 5)
         ? request.startAt
         : null;
-    _pendingUntil = DateTime.now().add(const Duration(seconds: 30));
+    _pendingUntil = DateTime.now().add(const Duration(seconds: 45));
     _pendingTries = 0;
     try {
       await player.open(
         Media(
           request.resolvedSource,
-          // Resume by starting the stream at the saved position rather than
-          // seeking after playback begins — AUDIT.md §3.
-          start: request.startAt > Duration.zero ? request.startAt : null,
+          // No Media(start:): on the real panel, opening at an offset makes
+          // mpv see an unseekable stream with no duration that plays from
+          // 0:00 (reproduced on-device). Resume seeks once the duration is
+          // known instead — see _pendingStart.
           httpHeaders: request.isLocal
               ? null
               : const {'User-Agent': Api.downloadUserAgent},
