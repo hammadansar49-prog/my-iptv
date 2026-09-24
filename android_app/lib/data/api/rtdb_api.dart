@@ -17,7 +17,25 @@ class LicenseVerdict {
     this.plan,
     this.expiresAt,
     this.isTrial = false,
+    this.devicesUsed,
+    this.maxDevices,
   });
+
+  /// Device slots on the key after this check (null for trials/unknown).
+  final int? devicesUsed;
+  final int? maxDevices;
+
+  /// Shown after a successful activation of a multi-device key.
+  String? get slotsNote {
+    final used = devicesUsed, max = maxDevices;
+    if (used == null || max == null || max <= 1) return null;
+    final left = max - used;
+    if (left <= 0) {
+      return 'This key is now in use on all $max devices it allows.';
+    }
+    return '$left more device${left == 1 ? '' : 's'} can still use this key '
+        '($used of $max used).';
+  }
 
   final bool valid;
 
@@ -31,11 +49,17 @@ class LicenseVerdict {
   static const notFound = LicenseVerdict(valid: false, reason: 'not-found');
 
   String get userMessage => switch (reason) {
-        'not-found' => 'That key was not recognised.',
-        'revoked' => 'This key has been revoked. Please contact support.',
-        'expired' => 'Your subscription has expired. Please renew to continue.',
-        'device-limit-reached' =>
-          'This key has already been used. Please contact your seller.',
+        'not-found' =>
+          'This licence key is incorrect. Please check it and try again.',
+        'revoked' => 'This key has been revoked. Please contact your seller.',
+        'expired' => 'This key has expired. Please renew to continue.',
+        'device-limit-reached' => (maxDevices ?? 1) <= 1
+            ? 'This key has already been used on another device. '
+                'It cannot be used again — please contact your seller.'
+            : 'This key has already been used on all $maxDevices devices it '
+                'allows. It cannot be used again — please contact your seller.',
+        'refused' =>
+          'This key could not be activated on this device. Please contact your seller.',
         'network-error' =>
           'Could not reach the licensing server. Check your connection and try again.',
         _ => 'This key could not be verified.',
@@ -399,6 +423,8 @@ class RtdbApi {
         valid: true,
         plan: plan,
         expiresAt: DateTime.fromMillisecondsSinceEpoch(expiresAt),
+        devicesUsed: 1,
+        maxDevices: maxDevices,
       );
     }
 
@@ -409,31 +435,45 @@ class RtdbApi {
     }
 
     // 5. Already claimed by this device.
+    final currentCount = asInt(row['device_count'], machineIds.length);
     if (asBool(machineIds[machineId])) {
       return LicenseVerdict(
         valid: true,
         plan: plan,
         expiresAt: asUnixMillis(row['expires_at']),
+        devicesUsed: currentCount,
+        maxDevices: maxDevices,
       );
     }
 
     // 6/7. Claim a device slot if one is free.
-    final currentCount = asInt(row['device_count'], machineIds.length);
     if (currentCount >= maxDevices) {
-      return const LicenseVerdict(valid: false, reason: 'device-limit-reached');
+      return LicenseVerdict(
+        valid: false,
+        reason: 'device-limit-reached',
+        maxDevices: maxDevices,
+      );
     }
     try {
       await _request('PATCH', path, {
         'device_count': currentCount + 1,
         'machine_ids/$machineId': true,
       });
-    } on AppError {
-      return const LicenseVerdict(valid: false, reason: 'network-error');
+    } on AppError catch (e) {
+      Log.w(_tag, 'slot claim failed: ${e.detail ?? e.message}');
+      // Rules refused the write (not a connection problem).
+      final refused = e.kind == AppErrorKind.server && e.retryable == false;
+      return LicenseVerdict(
+        valid: false,
+        reason: refused ? 'refused' : 'network-error',
+      );
     }
     return LicenseVerdict(
       valid: true,
       plan: plan,
       expiresAt: asUnixMillis(row['expires_at']),
+      devicesUsed: currentCount + 1,
+      maxDevices: maxDevices,
     );
   }
 

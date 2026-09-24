@@ -89,9 +89,15 @@ final plansProvider =
 /// Licence actions shared by the gate and the Plans screen. Each returns an
 /// error message for the user, or null on success.
 abstract final class LicenseActions {
+  /// Extra line for the success message of the last activation (how many
+  /// devices can still use a multi-device key), or null.
+  static String? lastActivationNote;
+
   static Future<String?> activateKey(WidgetRef ref, String key) async {
+    lastActivationNote = null;
     if (key.trim().isEmpty) return 'Enter your licence key.';
     final v = await ref.read(licenseRepositoryProvider).verify(key);
+    if (v.valid) lastActivationNote = v.slotsNote;
     return v.valid ? null : v.userMessage;
   }
 
@@ -112,7 +118,7 @@ abstract final class LicenseActions {
       return const LicenseVerdict(valid: false, reason: 'network-error')
           .userMessage;
     }
-    if (row == null) return 'That key was not recognised.';
+    if (row == null) return LicenseVerdict.notFound.userMessage;
     final status = asString(row['status']);
     if (status == 'revoked') {
       return const LicenseVerdict(valid: false, reason: 'revoked').userMessage;

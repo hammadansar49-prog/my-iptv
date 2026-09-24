@@ -57,6 +57,14 @@ class _LicenseScreenState extends ConsumerState<LicenseScreen> {
     });
     final err = await LicenseActions.activateKey(ref, _key.text);
     if (!mounted) return;
+    if (err == null) {
+      final note = LicenseActions.lastActivationNote;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text('Pro plan activated.${note == null ? '' : ' $note'}'),
+        ));
+    }
     setState(() {
       _busy = false;
       _error = err;

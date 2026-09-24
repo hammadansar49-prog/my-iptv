@@ -37,7 +37,10 @@ class _PlansScreenState extends ConsumerState<PlansScreen> {
       context: context,
       builder: (_) => _ActivateDialog(plan: plan, allPlans: all),
     );
-    if (ok == true && mounted) _snack('${plan.label} activated.');
+    if (ok == true && mounted) {
+      final note = LicenseActions.lastActivationNote;
+      _snack('${plan.label} activated.${note == null ? '' : ' $note'}');
+    }
   }
 
   Future<void> _get(SubscriptionPlan plan) async {
