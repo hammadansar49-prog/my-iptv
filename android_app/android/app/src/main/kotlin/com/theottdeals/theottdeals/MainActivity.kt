@@ -38,6 +38,17 @@ class MainActivity : FlutterActivity() {
                     val v = pendingAnnouncementTap
                     pendingAnnouncementTap = null
                     result.success(v)
+                } else if (call.method == "notifyIfHidden") {
+                    // The live stream got a new announcement while the app is
+                    // in the background: post the system notification now
+                    // instead of waiting for the 15-min poll.
+                    AnnouncementNotifier.maybeNotify(
+                        context.applicationContext,
+                        call.argument<String>("text"),
+                        call.argument<Number>("createdAt")?.toLong(),
+                        call.argument<Number>("expiresAt")?.toLong(),
+                    )
+                    result.success(null)
                 } else {
                     result.notImplemented()
                 }

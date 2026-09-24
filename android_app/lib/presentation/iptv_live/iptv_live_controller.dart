@@ -183,6 +183,10 @@ class IptvLiveController extends ChangeNotifier with WidgetsBindingObserver {
           Timer(Duration(milliseconds: left.clamp(0, 1 << 31)), () => _setAnnouncement(null));
     }
     _setAnnouncement(ann);
+    if (!forced) {
+      unawaited(AnnouncementPush.notifyIfHidden(
+          ann.text, ann.createdAt, ann.expiresAt));
+    }
   }
 
   void _setAnnouncement(Announcement? a) {

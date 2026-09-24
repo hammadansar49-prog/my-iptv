@@ -172,6 +172,15 @@ class DownloadManager {
     } catch (e) {
       Log.w(_tag, 'connectivity unavailable: $e');
     }
+    // Video closed: start the queued download straight away (after the
+    // same short gap the account needs to notice the old connection close).
+    _guard.onPlaybackEnded = () {
+      _retryTimer?.cancel();
+      _retryTimer = Timer(
+        consts.Downloads.resumeAfterPlayback,
+        () => unawaited(_pump()),
+      );
+    };
     // Anything left mid-flight by a kill is already normalised to `queued`
     // by DownloadItem.toJson; start whatever is waiting.
     unawaited(Future.delayed(const Duration(seconds: 3), _pump));

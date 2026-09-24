@@ -36,6 +36,21 @@ abstract final class AnnouncementPush {
     }
   }
 
+  /// System notification for an announcement the live stream delivered
+  /// while the app is in the background (native skips it when visible).
+  static Future<void> notifyIfHidden(
+      String text, int? createdAt, int? expiresAt) async {
+    try {
+      await _channel.invokeMethod('notifyIfHidden', {
+        'text': text,
+        'createdAt': createdAt,
+        'expiresAt': expiresAt,
+      });
+    } catch (e) {
+      Log.w(_tag, 'notifyIfHidden failed: $e');
+    }
+  }
+
   static Future<void> init() async {
     try {
       await Firebase.initializeApp();

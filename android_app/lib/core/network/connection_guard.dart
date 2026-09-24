@@ -156,11 +156,18 @@ class ConnectionGuard {
     }
   }
 
+  /// Called when the last playback lease goes (the video was closed), so
+  /// a download parked behind it can start by itself.
+  void Function()? onPlaybackEnded;
+
   void _release(ProviderLease lease) {
     _held.remove(lease);
     _lastRelease = DateTime.now();
     Log.d(_tag, 'released #${lease.id} ${lease.use.name} (held=${_held.length})');
     _drain();
+    if (lease.use == ProviderUse.playback && !hasPlayback) {
+      onPlaybackEnded?.call();
+    }
   }
 
   void _drain() {
