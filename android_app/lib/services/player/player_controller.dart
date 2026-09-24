@@ -108,6 +108,8 @@ class PlayerController extends ChangeNotifier {
 
   /// Saved position to resume at, until the engine has actually reached it.
   Duration? _pendingStart;
+  DateTime _pendingUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  int _pendingTries = 0;
 
   Player? _player;
   VideoController? _videoController;
@@ -195,20 +197,22 @@ class PlayerController extends ChangeNotifier {
       // While a seek is in flight the engine reports the old position; do not
       // fight the user's scrub with it.
       if (_seekInFlight) return;
-      // Resume fallback: some streams ignore Media(start:) and begin at 0.
-      // Once the engine is really playing from the top, seek there once,
-      // and never report the 0:00 position (it would overwrite the saved
-      // Continue Watching point).
+      // Resume fallback: some streams ignore Media(start:) and begin at 0
+      // (sometimes after first reporting the start point). For the first
+      // 30s, whenever the engine is playing far before the saved point,
+      // seek there (at most 3 tries), and never report those early
+      // positions — they would overwrite the Continue Watching point.
       final pending = _pendingStart;
       if (pending != null) {
-        if (position >= pending - const Duration(seconds: 10)) {
+        if (DateTime.now().isAfter(_pendingUntil) || _pendingTries >= 3) {
           _pendingStart = null;
-        } else {
-          if (position > const Duration(milliseconds: 500) &&
+        } else if (position < pending - const Duration(seconds: 10)) {
+          if (position > const Duration(milliseconds: 300) &&
               player.state.duration > Duration.zero) {
-            _pendingStart = null;
+            _pendingTries++;
             Log.i(_tag, 'start ignored by engine; seeking to $pending');
-            unawaited(seekTo(pending));
+            _pendingSeekTarget = pending;
+            unawaited(_drainSeeks());
           }
           return;
         }
@@ -337,6 +341,8 @@ class PlayerController extends ChangeNotifier {
     _pendingStart = !request.isLive && request.startAt > const Duration(seconds: 10)
         ? request.startAt
         : null;
+    _pendingUntil = DateTime.now().add(const Duration(seconds: 30));
+    _pendingTries = 0;
     try {
       await player.open(
         Media(
@@ -480,6 +486,7 @@ class PlayerController extends ChangeNotifier {
   /// requested position, so the overlay and the engine agree.
   Future<void> seekBy(Duration delta) async {
     if (_state.isLive) return;
+    _pendingStart = null;
     final base = _pendingSeekTarget ?? _state.position;
     var target = base + delta;
     if (target < Duration.zero) target = Duration.zero;
@@ -494,6 +501,7 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> seekTo(Duration target) async {
     if (_state.isLive) return;
+    _pendingStart = null; // the viewer chose a position; stop resuming
     _pendingSeekTarget = target;
     _set(_state.copyWith(position: target));
     await _drainSeeks();
