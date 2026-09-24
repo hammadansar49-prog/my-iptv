@@ -72,6 +72,17 @@ class DeviceIdentity {
     return _cached = digest.toString();
   }
 
+  /// The id this device had before ANDROID_ID was used (the old
+  /// Build.ID/fingerprint formula). Only read to find a free trial claimed
+  /// under it, so an app update does not hand out a second trial.
+  Future<String?> legacyMachineId() async {
+    final info = await androidInfo();
+    if (info == null) return null;
+    final basis = [info.id, info.fingerprint, info.model, info.hardware, info.board]
+        .join('|');
+    return sha256.convert(utf8.encode(basis)).toString();
+  }
+
   /// Human-readable device label for the account screen (spec §34).
   Future<String> displayName() async {
     final info = await androidInfo();

@@ -150,15 +150,31 @@ class LicenseRepositoryImpl implements LicenseRepository {
   @override
   Future<TrialConfig> trialConfig() => _api.trialConfig();
 
+  /// A purchased key is active right now. A trial must never replace it.
+  bool get _paidActive => _key != null && isLicensed;
+
+  /// One trial per device, ever: checked on the server (survives reinstall)
+  /// under the current id and the pre-ANDROID_ID one.
+  Future<bool> _deviceTrialUnused() async {
+    if (!await _api.isTrialAvailable(await _identity.machineId())) return false;
+    final legacy = await _identity.legacyMachineId();
+    if (legacy == null) return true;
+    return _api.isTrialAvailable(legacy);
+  }
+
   @override
   Future<bool> trialAvailable() async {
+    if (isLicensed) return false;
     final config = await _api.trialConfig();
     if (!config.enabled) return false;
-    return _api.isTrialAvailable(await _identity.machineId());
+    return _deviceTrialUnused();
   }
 
   @override
   Future<LicenseVerdict> claimTrial() async {
+    if (_paidActive || !await _deviceTrialUnused()) {
+      return const LicenseVerdict(valid: false, reason: 'not-found');
+    }
     final config = await _api.trialConfig();
     final verdict = await _api.claimTrial(await _identity.machineId(), config);
     if (verdict.valid) {

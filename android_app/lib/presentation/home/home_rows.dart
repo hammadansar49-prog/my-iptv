@@ -986,9 +986,14 @@ class ContinueWatchingSection extends ConsumerWidget {
     // Anything stale is caught again on tap.
     final downloads = ref.read(downloadManagerProvider).items;
     final items = <_Resumable>[];
+    // One card per title: the same movie/episode played from Downloads, or
+    // listed twice by the panel under another id, has its own history key.
+    // History is most-recent-first, so the first one seen is the latest.
+    final seen = <String>{};
     for (final e in history) {
       final r = _Resumable.from(e, downloads);
       if (r == null) continue;
+      if (!seen.add(_identity(e))) continue;
       final keep = switch (filter) {
         HomeFilter.all => true,
         HomeFilter.movies || HomeFilter.ott =>
@@ -1034,6 +1039,10 @@ class ContinueWatchingSection extends ConsumerWidget {
     );
   }
 }
+
+/// What makes two history rows "the same thing" for Continue Watching.
+String _identity(HistoryEntry e) =>
+    '${e.title.trim().toLowerCase()}|${(e.subtitle ?? '').trim().toLowerCase()}';
 
 class _ContinueCard extends ConsumerWidget {
   const _ContinueCard({
@@ -1104,7 +1113,12 @@ class _ContinueCard extends ConsumerWidget {
 
   void _remove(BuildContext context, WidgetRef ref) {
     final entry = item.entry;
-    ref.read(libraryRepositoryProvider).removeHistory(entry.key);
+    // Older duplicates of the same title go too, or one would pop back up.
+    final library = ref.read(libraryRepositoryProvider);
+    final id = _identity(entry);
+    for (final h in library.continueWatching()) {
+      if (_identity(h) == id) library.removeHistory(h.key);
+    }
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(

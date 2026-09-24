@@ -6,6 +6,8 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.Constraints
@@ -33,7 +35,9 @@ import java.util.concurrent.TimeUnit
  * so a poll never keeps the process (or the cached engine) alive.
  */
 object AnnouncementNotifier {
-    const val CHANNEL_ID = "announcements"
+    // v2: a channel's sound is fixed once created, so the chime needs a new id.
+    const val CHANNEL_ID = "announcements_v2"
+    private const val OLD_CHANNEL_ID = "announcements"
     const val EXTRA_TAP = "announcement_tap_created_at"
     private const val NOTIFICATION_ID = 7310
     private const val PREFS = "announcement_notifier"
@@ -68,9 +72,21 @@ object AnnouncementNotifier {
         if (createdAt <= notified || createdAt <= readSeenInApp(context)) return
 
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val sound = Uri.parse("android.resource://${context.packageName}/${R.raw.iptv_chime}")
         if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(CHANNEL_ID) == null) {
+            nm.deleteNotificationChannel(OLD_CHANNEL_ID)
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Announcements", NotificationManager.IMPORTANCE_HIGH)
+                NotificationChannel(CHANNEL_ID, "Announcements", NotificationManager.IMPORTANCE_HIGH).apply {
+                    setSound(
+                        sound,
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    enableVibration(true)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                }
             )
         }
         // singleTop activity: an existing instance gets onNewIntent, not a copy.
@@ -89,6 +105,8 @@ object AnnouncementNotifier {
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setSound(sound) // pre-Android 8; the channel's sound after
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             .setContentIntent(pi)
             .build()
