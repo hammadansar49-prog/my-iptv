@@ -106,6 +106,9 @@ class PlayerController extends ChangeNotifier {
 
   final ConnectionGuard _guard;
 
+  /// Saved position to resume at, until the engine has actually reached it.
+  Duration? _pendingStart;
+
   Player? _player;
   VideoController? _videoController;
   ProviderLease? _lease;
@@ -192,6 +195,24 @@ class PlayerController extends ChangeNotifier {
       // While a seek is in flight the engine reports the old position; do not
       // fight the user's scrub with it.
       if (_seekInFlight) return;
+      // Resume fallback: some streams ignore Media(start:) and begin at 0.
+      // Once the engine is really playing from the top, seek there once,
+      // and never report the 0:00 position (it would overwrite the saved
+      // Continue Watching point).
+      final pending = _pendingStart;
+      if (pending != null) {
+        if (position >= pending - const Duration(seconds: 10)) {
+          _pendingStart = null;
+        } else {
+          if (position > const Duration(milliseconds: 500) &&
+              player.state.duration > Duration.zero) {
+            _pendingStart = null;
+            Log.i(_tag, 'start ignored by engine; seeking to $pending');
+            unawaited(seekTo(pending));
+          }
+          return;
+        }
+      }
       _set(_state.copyWith(position: position));
     });
 
@@ -313,6 +334,9 @@ class PlayerController extends ChangeNotifier {
   Future<void> _openMedia(PlaybackRequest request, int generation) async {
     final player = _player;
     if (player == null) return;
+    _pendingStart = !request.isLive && request.startAt > const Duration(seconds: 10)
+        ? request.startAt
+        : null;
     try {
       await player.open(
         Media(
