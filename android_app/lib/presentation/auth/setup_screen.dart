@@ -35,10 +35,138 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     });
   }
 
+  Widget _header(TextTheme text) => Row(
+        children: [
+          Expanded(child: Text('MY IPTV', style: text.displaySmall)),
+          IconButton(
+            onPressed: () => context.push(Routes.settings),
+            icon: const Icon(Icons.settings_rounded),
+            color: AppColors.textPrimary,
+            iconSize: 26,
+            tooltip: 'Settings',
+            // Visible when reached with the TV remote.
+            focusColor: AppColors.accentSoft,
+          ),
+        ],
+      );
+
+  Widget _choose({bool autofocus = false}) => Center(
+        child: _ChoosePill(
+          label: 'Choose Xtreaming',
+          autofocus: autofocus,
+          onTap: () => context.push(Routes.xtreamLogin),
+        ),
+      );
+
+  // IntrinsicHeight, not a bare `Row(crossAxisAlignment: stretch)`: inside a
+  // ListView the Row gets unbounded height, and `stretch` alone then asks
+  // for infinity — which crashed layout every frame and left the first-run
+  // screen permanently black. IntrinsicHeight measures the two cards first
+  // so both still end up the same height.
+  Widget _sourceRow() => IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: _SourceCard(
+                title: 'Playlist',
+                description: 'Explore your all playlist channels',
+                icon: Icons.subscriptions_rounded,
+                enabled: true,
+                onTap: () => context.push(Routes.customPlaylists),
+              ),
+            ),
+            const SizedBox(width: Insets.md),
+            Expanded(
+              child: _SourceCard(
+                title: 'Single Channel',
+                description: 'Play channel with streaming link',
+                icon: Icons.podcasts_rounded,
+                enabled: true,
+                onTap: () => context.push(Routes.customChannels),
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _xtreamCard(List<Object?> saved) => _SourceCard(
+        title: 'Xtream List',
+        description: saved.isEmpty
+            ? 'Add your playlist (via XC API)'
+            : '${saved.length} saved playlist'
+                '${saved.length == 1 ? '' : 's'} · add another',
+        icon: Icons.cast_connected_rounded,
+        enabled: true,
+        wide: true,
+        onTap: () => context.push(
+          // With something already saved, go straight to the account
+          // switcher; otherwise to the form that creates the first one.
+          saved.isEmpty ? Routes.xtreamLogin : Routes.accounts,
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final saved = ref.watch(authControllerProvider).savedAccounts;
+    final size = MediaQuery.sizeOf(context);
+
+    // TV / landscape: everything on one screen, no scrolling — the banner
+    // on the left, every option on the right, scaled down to fit whatever
+    // the display is. (On a TV the stacked phone layout pushed the options
+    // below the fold, and the remote could not scroll back up to Settings.)
+    if (size.width > size.height && size.width >= 640) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+                Insets.xl, Insets.md, Insets.xl, Insets.lg),
+            child: Column(
+              children: [
+                _header(text),
+                const SizedBox(height: Insets.md),
+                Expanded(
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        flex: 5,
+                        child: Center(child: HeroTvBanner()),
+                      ),
+                      const SizedBox(width: Insets.xl),
+                      Expanded(
+                        flex: 6,
+                        child: LayoutBuilder(
+                          builder: (context, box) => Center(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: SizedBox(
+                                width: box.maxWidth,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _choose(autofocus: true),
+                                    const SizedBox(height: Insets.lg),
+                                    _sourceRow(),
+                                    const SizedBox(height: Insets.md),
+                                    _xtreamCard(saved),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -47,89 +175,17 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
           padding: const EdgeInsets.fromLTRB(
               Insets.lg, Insets.md, Insets.lg, Insets.xxl),
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text('MY IPTV', style: text.displaySmall),
-                ),
-                IconButton(
-                  onPressed: () => context.push(Routes.settings),
-                  icon: const Icon(Icons.settings_rounded),
-                  color: AppColors.textPrimary,
-                  iconSize: 26,
-                  tooltip: 'Settings',
-                ),
-              ],
-            ),
+            _header(text),
             const SizedBox(height: Insets.md),
-
             const HeroTvBanner(),
             const SizedBox(height: Insets.lg),
-
             // Primary call to action. Goes to the same place as the Xtream
             // List card below, because that is the one real way in.
-            Center(
-              child: _ChoosePill(
-                label: 'Choose Xtreaming',
-                onTap: () => context.push(Routes.xtreamLogin),
-              ),
-            ),
+            _choose(),
             const SizedBox(height: Insets.xl),
-
-            // IntrinsicHeight, not a bare `Row(crossAxisAlignment: stretch)`:
-            // this Row lives inside a ListView, which hands it unbounded
-            // height. `stretch` on its own asks children to fill that
-            // unbounded height ("BoxConstraints forces an infinite height"),
-            // which crashed layout every frame and left the whole screen
-            // permanently black on first run (no saved account -> this is
-            // the first screen shown) — no exception overlay, no error
-            // shown, just nothing ever rendering. IntrinsicHeight measures
-            // the two cards' natural height first and gives stretch a real
-            // number to work with, so both cards still end up the same
-            // height without asking for infinity.
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: _SourceCard(
-                      title: 'Playlist',
-                      description: 'Explore your all playlist channels',
-                      icon: Icons.subscriptions_rounded,
-                      enabled: true,
-                      onTap: () => context.push(Routes.customPlaylists),
-                    ),
-                  ),
-                  const SizedBox(width: Insets.md),
-                  Expanded(
-                    child: _SourceCard(
-                      title: 'Single Channel',
-                      description: 'Play channel with streaming link',
-                      icon: Icons.podcasts_rounded,
-                      enabled: true,
-                      onTap: () => context.push(Routes.customChannels),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            _sourceRow(),
             const SizedBox(height: Insets.md),
-
-            _SourceCard(
-              title: 'Xtream List',
-              description: saved.isEmpty
-                  ? 'Add your playlist (via XC API)'
-                  : '${saved.length} saved playlist'
-                      '${saved.length == 1 ? '' : 's'} · add another',
-              icon: Icons.cast_connected_rounded,
-              enabled: true,
-              wide: true,
-              onTap: () => context.push(
-                // With something already saved, go straight to the account
-                // switcher; otherwise to the form that creates the first one.
-                saved.isEmpty ? Routes.xtreamLogin : Routes.accounts,
-              ),
-            ),
+            _xtreamCard(saved),
           ],
         ),
       ),
@@ -138,10 +194,15 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
 }
 
 class _ChoosePill extends StatelessWidget {
-  const _ChoosePill({required this.label, required this.onTap});
+  const _ChoosePill({
+    required this.label,
+    required this.onTap,
+    this.autofocus = false,
+  });
 
   final String label;
   final VoidCallback onTap;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
@@ -150,6 +211,7 @@ class _ChoosePill extends StatelessWidget {
       borderRadius: BorderRadius.circular(Radii.pill),
       child: InkWell(
         onTap: onTap,
+        autofocus: autofocus,
         borderRadius: BorderRadius.circular(Radii.pill),
         focusColor: AppColors.accentSoft,
         child: Padding(

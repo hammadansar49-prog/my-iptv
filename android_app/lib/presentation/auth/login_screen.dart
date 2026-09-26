@@ -53,7 +53,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     FocusScope.of(context).unfocus();
-    final ok = await ref.read(authControllerProvider.notifier).signIn(
+    final ok = await ref
+        .read(authControllerProvider.notifier)
+        .signIn(
           name: _name.text,
           url: _url.text,
           username: _username.text,
@@ -90,129 +92,147 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       body: SafeArea(
         child: AbsorbPointer(
           absorbing: state.isBusy,
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-            children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: _CloseButton(onTap: _close),
-              ),
-              const SizedBox(height: 22),
-              const Text(
-                'Add Xtream Account',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.3,
+          // TV remote: Up/Down move between the fields and buttons (a text
+          // field would otherwise swallow them as cursor keys). The focused
+          // field scrolls itself above the keyboard — see _FieldState.
+          child: Shortcuts(
+            shortcuts: const {
+              SingleActivator(LogicalKeyboardKey.arrowDown): NextFocusIntent(),
+              SingleActivator(LogicalKeyboardKey.arrowUp):
+                  PreviousFocusIntent(),
+            },
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: _CloseButton(onTap: _close),
                 ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Connect your IPTV provider to start streaming live '
-                'channels, movies, and series.',
-                style: TextStyle(
-                  color: Color(0xFF9A9A9F),
-                  fontSize: 16,
-                  height: 1.4,
+                const SizedBox(height: 22),
+                const Text(
+                  'Add Xtream Account',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.3,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 26),
-              if (state.error != null) ...[
-                ErrorBanner(
-                  message: state.error!.message,
-                  onDismiss:
-                      ref.read(authControllerProvider.notifier).clearError,
+                const SizedBox(height: 10),
+                const Text(
+                  'Connect your IPTV provider to start streaming live '
+                  'channels, movies, and series.',
+                  style: TextStyle(
+                    color: Color(0xFF9A9A9F),
+                    fontSize: 16,
+                    height: 1.4,
+                  ),
                 ),
-                const SizedBox(height: 16),
-              ],
-              Form(
-                key: _formKey,
-                child: Column(
+                const SizedBox(height: 26),
+                if (state.error != null) ...[
+                  ErrorBanner(
+                    message: state.error!.message,
+                    onDismiss: ref
+                        .read(authControllerProvider.notifier)
+                        .clearError,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    children: [
+                      _Field(
+                        icon: Icons.sell_rounded,
+                        label: 'PLAYLIST NAME',
+                        hint: 'Enter playlist name',
+                        controller: _name,
+                        textInputAction: TextInputAction.next,
+                      ),
+                      const SizedBox(height: 16),
+                      _Field(
+                        icon: Icons.person_rounded,
+                        label: 'USERNAME',
+                        hint: 'Enter username',
+                        controller: _username,
+                        textInputAction: TextInputAction.next,
+                        validator: (v) => (v ?? '').trim().isEmpty
+                            ? 'Enter your username'
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                      _Field(
+                        icon: Icons.lock_rounded,
+                        label: 'PASSWORD',
+                        hint: 'Enter password',
+                        controller: _password,
+                        obscure: _obscure,
+                        textInputAction: TextInputAction.next,
+                        trailing: _TrailingIcon(
+                          icon: _obscure
+                              ? Icons.visibility_rounded
+                              : Icons.visibility_off_rounded,
+                          tooltip: _obscure ? 'Show password' : 'Hide password',
+                          onTap: () => setState(() => _obscure = !_obscure),
+                        ),
+                        validator: (v) =>
+                            (v ?? '').isEmpty ? 'Enter your password' : null,
+                      ),
+                      const SizedBox(height: 16),
+                      _Field(
+                        icon: Icons.language_rounded,
+                        label: 'SERVER URL',
+                        hint: 'http://your-iptv-server.com',
+                        controller: _url,
+                        keyboardType: TextInputType.url,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => _submit(),
+                        trailing: _TrailingIcon(
+                          icon: Icons.content_paste_rounded,
+                          tooltip: 'Paste',
+                          onTap: _pasteUrl,
+                        ),
+                        validator: (v) {
+                          final t = (v ?? '').trim();
+                          if (t.isEmpty) return 'Enter your server URL';
+                          final uri = Uri.tryParse(Account.normaliseUrl(t));
+                          if (uri == null || uri.host.isEmpty) {
+                            return 'That does not look like a valid URL';
+                          }
+                          return null;
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 30),
+                _GlowButton(
+                  label: 'Connect Account',
+                  busy: state.isBusy,
+                  onTap: _submit,
+                ),
+                const SizedBox(height: 18),
+                const Row(
                   children: [
-                    _Field(
-                      icon: Icons.sell_rounded,
-                      label: 'PLAYLIST NAME',
-                      hint: 'Enter playlist name',
-                      controller: _name,
-                      textInputAction: TextInputAction.next,
+                    Icon(
+                      Icons.shield_rounded,
+                      size: 15,
+                      color: Color(0xFF7C7C80),
                     ),
-                    const SizedBox(height: 16),
-                    _Field(
-                      icon: Icons.person_rounded,
-                      label: 'USERNAME',
-                      hint: 'Enter username',
-                      controller: _username,
-                      textInputAction: TextInputAction.next,
-                      validator: (v) => (v ?? '').trim().isEmpty
-                          ? 'Enter your username'
-                          : null,
-                    ),
-                    const SizedBox(height: 16),
-                    _Field(
-                      icon: Icons.lock_rounded,
-                      label: 'PASSWORD',
-                      hint: 'Enter password',
-                      controller: _password,
-                      obscure: _obscure,
-                      textInputAction: TextInputAction.next,
-                      trailing: _TrailingIcon(
-                        icon: _obscure
-                            ? Icons.visibility_rounded
-                            : Icons.visibility_off_rounded,
-                        tooltip: _obscure ? 'Show password' : 'Hide password',
-                        onTap: () => setState(() => _obscure = !_obscure),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Your credentials are encrypted and stored only on this device.',
+                        style: TextStyle(
+                          color: Color(0xFF7C7C80),
+                          fontSize: 12.5,
+                        ),
                       ),
-                      validator: (v) =>
-                          (v ?? '').isEmpty ? 'Enter your password' : null,
-                    ),
-                    const SizedBox(height: 16),
-                    _Field(
-                      icon: Icons.language_rounded,
-                      label: 'SERVER URL',
-                      hint: 'http://your-iptv-server.com',
-                      controller: _url,
-                      keyboardType: TextInputType.url,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _submit(),
-                      trailing: _TrailingIcon(
-                        icon: Icons.content_paste_rounded,
-                        tooltip: 'Paste',
-                        onTap: _pasteUrl,
-                      ),
-                      validator: (v) {
-                        final t = (v ?? '').trim();
-                        if (t.isEmpty) return 'Enter your server URL';
-                        final uri = Uri.tryParse(Account.normaliseUrl(t));
-                        if (uri == null || uri.host.isEmpty) {
-                          return 'That does not look like a valid URL';
-                        }
-                        return null;
-                      },
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 30),
-              _GlowButton(
-                label: 'Connect Account',
-                busy: state.isBusy,
-                onTap: _submit,
-              ),
-              const SizedBox(height: 18),
-              const Row(
-                children: [
-                  Icon(Icons.shield_rounded, size: 15, color: Color(0xFF7C7C80)),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Your credentials are encrypted and stored only on this device.',
-                      style: TextStyle(color: Color(0xFF7C7C80), fontSize: 12.5),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -284,7 +304,23 @@ class _FieldState extends State<_Field> {
   @override
   void initState() {
     super.initState();
-    _focus.addListener(() => setState(() {}));
+    _focus.addListener(() {
+      setState(() {});
+      if (!_focus.hasFocus) return;
+      // Bring the field above the on-screen keyboard (TV and phone), after
+      // the keyboard has had a moment to open and shrink the view.
+      for (final ms in const [50, 450]) {
+        Future.delayed(Duration(milliseconds: ms), () {
+          if (!mounted || !_focus.hasFocus) return;
+          Scrollable.ensureVisible(
+            context,
+            alignment: 0.15,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOut,
+          );
+        });
+      }
+    });
   }
 
   @override
@@ -340,6 +376,7 @@ class _FieldState extends State<_Field> {
                     enableSuggestions: !widget.obscure,
                     validator: widget.validator,
                     cursorColor: AppColors.accent,
+                    scrollPadding: const EdgeInsets.fromLTRB(20, 120, 20, 160),
                     style: const TextStyle(color: Colors.white, fontSize: 17),
                     decoration: InputDecoration(
                       hintText: widget.hint,
@@ -424,6 +461,8 @@ class _GlowButton extends StatelessWidget {
         child: InkWell(
           onTap: busy ? null : onTap,
           borderRadius: BorderRadius.circular(16),
+          // Visible focus for the TV remote.
+          focusColor: Colors.white.withValues(alpha: 0.28),
           child: SizedBox(
             height: 58,
             child: Center(
