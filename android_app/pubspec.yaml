@@ -53,6 +53,7 @@ dependencies:
   # and Gradle only applies google-services when the file exists.
   firebase_core: ^4.15.0
   firebase_messaging: ^16.7.0
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:

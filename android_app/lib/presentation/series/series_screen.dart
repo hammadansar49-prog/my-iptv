@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../widgets/focus_zoom.dart';
+import '../home/content_filter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -111,13 +113,19 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
           onRetry: () => ref.invalidate(seriesProvider(categoryId)),
         ),
       ),
-      data: (list) => list.isEmpty
-          ? const EmptyState(
-              icon: Icons.video_library_outlined,
-              title: 'No Series Found',
-              message: 'This category is empty.',
-            )
-          : _grid(list),
+      // Browsing hides what Home hides; search still finds everything.
+      data: (all) {
+        final filter = ref.watch(seriesFilterProvider).valueOrNull;
+        final list =
+            filter == null ? all : all.where(filter.keepSeries).toList();
+        return list.isEmpty
+            ? const EmptyState(
+                icon: Icons.video_library_outlined,
+                title: 'No Series Found',
+                message: 'This category is empty.',
+              )
+            : _grid(list);
+      },
     );
   }
 
@@ -132,7 +140,8 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
         mainAxisSpacing: Insets.lg,
       ),
       itemCount: list.length,
-      itemBuilder: (context, i) => _SeriesCard(series: list[i]),
+      clipBehavior: Clip.none,
+      itemBuilder: (context, i) => FocusZoom(child: _SeriesCard(series: list[i])),
     );
   }
 }

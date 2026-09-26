@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -22,6 +23,9 @@ class TheOttDealsApp extends ConsumerWidget {
       darkTheme: AppTheme.build(tv: isTv),
       themeMode: ThemeMode.dark,
       routerConfig: router,
+      // TV boxes often come with a mouse: let a left-button drag scroll
+      // lists the way a finger does (Flutter only allows touch by default).
+      scrollBehavior: const _AppScrollBehavior(),
       builder: (context, child) {
         // Lock text scaling: a user with huge system text must not break the
         // EPG grid or the player controls (spec §39/§45). On narrow phones
@@ -50,7 +54,24 @@ class TheOttDealsApp extends ConsumerWidget {
             return content;
           },
         );
-        return isTv ? _TvCanvas(child: inner) : inner;
+        // Right mouse button = Back, like the remote's Back key (dialogs,
+        // keyboard, then the previous screen — PopScope rules apply).
+        final withMouseBack = Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (e) {
+            if (e.kind == PointerDeviceKind.mouse &&
+                (e.buttons & kSecondaryMouseButton) != 0) {
+              final focus = FocusManager.instance.primaryFocus;
+              if (focus?.context?.widget is EditableText) {
+                focus!.unfocus(); // closes the keyboard first
+              } else {
+                router.routerDelegate.navigatorKey.currentState?.maybePop();
+              }
+            }
+          },
+          child: inner,
+        );
+        return isTv ? _TvCanvas(child: withMouseBack) : withMouseBack;
       },
     );
   }
@@ -69,7 +90,8 @@ class _TvCanvas extends StatelessWidget {
 
   final Widget child;
 
-  static const _width = 1600.0;
+  static const _width = 2048.0;
+  static const _overscan = EdgeInsets.fromLTRB(48, 24, 48, 28);
 
   @override
   Widget build(BuildContext context) {
@@ -87,8 +109,11 @@ class _TvCanvas extends StatelessWidget {
           data: media.copyWith(
             size: canvas,
             devicePixelRatio: media.devicePixelRatio * scale,
-            padding: media.padding / scale,
-            viewPadding: media.viewPadding / scale,
+            // TV overscan: many sets crop the picture edges, which hid the
+            // bottom nav bar and made it hard to reach with a mouse. Every
+            // SafeArea/extendBody inset honours this margin.
+            padding: media.padding / scale + _overscan,
+            viewPadding: media.viewPadding / scale + _overscan,
             viewInsets: media.viewInsets / scale,
           ),
           child: child,
@@ -96,4 +121,14 @@ class _TvCanvas extends StatelessWidget {
       ),
     );
   }
+}
+
+class _AppScrollBehavior extends MaterialScrollBehavior {
+  const _AppScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        ...super.dragDevices,
+        PointerDeviceKind.mouse,
+      };
 }

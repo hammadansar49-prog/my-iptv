@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../widgets/focus_zoom.dart';
+import '../home/content_filter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -111,13 +113,20 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
           onRetry: () => ref.invalidate(moviesProvider(categoryId)),
         ),
       ),
-      data: (movies) => movies.isEmpty
+      // Browsing hides what Home hides (event recordings, recycled
+      // placeholder posters, no artwork); search still finds everything.
+      data: (all) {
+        final filter = ref.watch(movieFilterProvider).valueOrNull;
+        final movies =
+            filter == null ? all : all.where(filter.keepMovie).toList();
+        return movies.isEmpty
           ? const EmptyState(
               icon: Icons.movie_outlined,
               title: 'No Movies Found',
               message: 'This category is empty.',
             )
-          : _grid(movies),
+          : _grid(movies);
+      },
     );
   }
 
@@ -133,7 +142,8 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
         mainAxisSpacing: Insets.lg,
       ),
       itemCount: movies.length,
-      itemBuilder: (context, i) => _MovieCard(movie: movies[i]),
+      clipBehavior: Clip.none,
+      itemBuilder: (context, i) => FocusZoom(child: _MovieCard(movie: movies[i])),
     );
   }
 }

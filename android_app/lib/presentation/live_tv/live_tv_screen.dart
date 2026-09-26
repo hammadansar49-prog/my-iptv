@@ -193,6 +193,40 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen>
           bottom: !_fullscreen,
           child: _fullscreen
               ? _buildVideo(expanded: true)
+              : _wide(context)
+              // TV / landscape: video on the left, search + categories +
+              // channels on the right — a TV-wide 16:9 player on top left
+              // no room for the list or the search field.
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: MediaQuery.sizeOf(context).width * 0.42,
+                      child: Padding(
+                        padding: const EdgeInsets.all(Insets.md),
+                        child: _buildVideo(expanded: false),
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          ScopedSearchField(
+                            controller: _searchController,
+                            hint: 'Search channels',
+                            onChanged: _onSearchChanged,
+                            onClear: () {
+                              _searchController.clear();
+                              setState(() => _query = '');
+                            },
+                          ),
+                          if (_query.isEmpty)
+                            const CategoryStrip(section: ContentSection.live),
+                          Expanded(child: _buildChannelList(categoryId)),
+                        ],
+                      ),
+                    ),
+                  ],
+                )
               : Column(
                   children: [
                     _buildVideo(expanded: false),
@@ -213,6 +247,11 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen>
         ),
       ),
     );
+  }
+
+  static bool _wide(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    return size.width > size.height && size.width >= 640;
   }
 
   Widget _buildVideo({required bool expanded}) {

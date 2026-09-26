@@ -218,6 +218,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildFilterPills() {
+    // TV / wide screens: the pills fit, so centre them as one group.
+    final size = MediaQuery.sizeOf(context);
+    if (size.width > size.height && size.width >= 900) {
+      return Padding(
+        padding: const EdgeInsets.only(top: Insets.md, bottom: Insets.sm),
+        child: Wrap(
+          alignment: WrapAlignment.center,
+          spacing: Insets.md,
+          runSpacing: Insets.sm,
+          children: [
+            for (final f in HomeFilter.values)
+              _FilterPill(
+                label: f.label,
+                selected: f == _filter,
+                onTap: () {
+                  if (f != _filter) setState(() => _filter = f);
+                },
+              ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(top: Insets.md, bottom: Insets.sm),
       child: SizedBox(

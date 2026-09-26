@@ -6,7 +6,9 @@ import '../../core/errors/app_error.dart';
 import '../../data/api/rtdb_api.dart';
 import '../../data/models/json.dart';
 import '../iptv_live/iptv_live_controller.dart';
+import '../../app/app.dart' show routerProvider;
 import '../providers.dart';
+import 'whatsapp_qr_dialog.dart';
 
 /// What the gate, the Home badge and the Plans screen all read.
 @immutable
@@ -89,6 +91,36 @@ final plansProvider =
 /// Licence actions shared by the gate and the Plans screen. Each returns an
 /// error message for the user, or null on success.
 abstract final class LicenseActions {
+  /// Used only when the admin has not set a number in `iptv/settings`.
+  static const _defaultWhatsApp = '923341100761';
+
+  /// Phone: open the WhatsApp chat. Android TV (no WhatsApp): show the
+  /// number, name and a QR code that opens the same chat on a phone.
+  static Future<String?> _openWhatsApp(
+    WidgetRef ref,
+    String digits,
+    String message, {
+    String? planLabel,
+  }) async {
+    if (ref.read(isTvProvider)) {
+      final ctx =
+          ref.read(routerProvider).routerDelegate.navigatorKey.currentContext;
+      if (ctx == null) return 'Could not show the contact details.';
+      await showWhatsAppQrDialog(
+        ctx,
+        digits: digits,
+        message: message,
+        planLabel: planLabel,
+      );
+      return null;
+    }
+    final ok = await launchUrl(
+      Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(message)}'),
+      mode: LaunchMode.externalApplication,
+    );
+    return ok ? null : 'Could not open WhatsApp.';
+  }
+
   /// Extra line for the success message of the last activation (how many
   /// devices can still use a multi-device key), or null.
   static String? lastActivationNote;
@@ -157,16 +189,9 @@ abstract final class LicenseActions {
       number =
           await ref.read(licenseRepositoryProvider).supportWhatsAppNumber();
     }
-    final digits = (number ?? '').replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.isEmpty) {
-      return 'WhatsApp number is not set up yet — please try again later.';
-    }
-    final text = Uri.encodeComponent('Hi, I have a question about MY IPTV.');
-    final ok = await launchUrl(
-      Uri.parse('https://wa.me/$digits?text=$text'),
-      mode: LaunchMode.externalApplication,
-    );
-    return ok ? null : 'Could not open WhatsApp.';
+    var digits = (number ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) digits = _defaultWhatsApp;
+    return _openWhatsApp(ref, digits, 'Hi, I have a question about MY IPTV.');
   }
 
   /// Port of renderer.js openPackageOnWhatsApp.
@@ -188,10 +213,8 @@ abstract final class LicenseActions {
         return 'Could not open WhatsApp — check your internet connection.';
       }
     }
-    final digits = (number ?? '').replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.isEmpty) {
-      return 'WhatsApp number is not set up yet — please try again later.';
-    }
+    var digits = (number ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) digits = _defaultWhatsApp;
     final message = (template?.trim().isNotEmpty ?? false
             ? template!
             : "Hi TheOTTDeals! 👋\n\nI'd like to activate the *MY IPTV {plan}* "
@@ -200,11 +223,7 @@ abstract final class LicenseActions {
         .replaceAll('{plan}', plan.label)
         .replaceAll('{price}', plan.priceLabel)
         .replaceAll('{duration}', '${plan.durationDays} day(s)');
-    final ok = await launchUrl(
-      Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(message)}'),
-      mode: LaunchMode.externalApplication,
-    );
-    return ok ? null : 'Could not open WhatsApp.';
+    return _openWhatsApp(ref, digits, message, planLabel: plan.label);
   }
 }
 

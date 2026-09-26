@@ -13,6 +13,7 @@ import '../../data/models/library.dart';
 import '../../domain/repositories/repositories.dart';
 import '../../services/player/playback_request.dart';
 import '../providers.dart';
+import '../widgets/focus_zoom.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/network_artwork.dart';
 import 'home_feed.dart';
@@ -450,9 +451,11 @@ class _Strip extends StatelessWidget {
         itemExtent: extent,
         cacheExtent: extent * 2,
         itemCount: itemCount,
+        // The focused tile grows a little (FocusZoom); don't clip it.
+        clipBehavior: Clip.none,
         itemBuilder: (context, i) => Padding(
           padding: const EdgeInsets.only(right: gap),
-          child: itemBuilder(context, i),
+          child: FocusZoom(child: itemBuilder(context, i)),
         ),
       ),
     );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_colors.dart';
@@ -48,9 +49,9 @@ class CategoryStrip extends ConsumerWidget {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(Radii.pill),
                 ),
-                onSelected: (_) => ref
-                    .read(selectedCategoryProvider(section).notifier)
-                    .state = category.id,
+                onSelected: (_) =>
+                    ref.read(selectedCategoryProvider(section).notifier).state =
+                        category.id,
               );
             },
           ),
@@ -82,24 +83,57 @@ class ScopedSearchField extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          Insets.lg, Insets.md, Insets.lg, Insets.sm),
-      child: TextField(
-        controller: controller,
-        onChanged: onChanged,
-        textInputAction: TextInputAction.search,
-        decoration: InputDecoration(
-          hintText: hint,
-          prefixIcon: const Icon(Icons.search_rounded,
-              color: AppColors.textSecondary, size: 20),
-          suffixIcon: controller.text.isEmpty
-              ? null
-              : IconButton(
-                  icon: const Icon(Icons.close_rounded, size: 18),
-                  color: AppColors.textSecondary,
-                  onPressed: onClear,
-                ),
-          contentPadding: const EdgeInsets.symmetric(
-              horizontal: Insets.lg, vertical: Insets.md),
+        Insets.lg,
+        Insets.md,
+        Insets.lg,
+        Insets.sm,
+      ),
+      // TV remote: a text field eats Up/Down as cursor keys, which trapped
+      // the focus in the search box. Up/Down leave the field instead, and
+      // Back/Escape just drops focus (closing the keyboard).
+      child: Shortcuts(
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.arrowDown): DirectionalFocusIntent(
+            TraversalDirection.down,
+          ),
+          SingleActivator(LogicalKeyboardKey.arrowUp): DirectionalFocusIntent(
+            TraversalDirection.up,
+          ),
+        },
+        child: Actions(
+          actions: {
+            DismissIntent: CallbackAction<DismissIntent>(
+              onInvoke: (_) {
+                FocusManager.instance.primaryFocus?.unfocus();
+                return null;
+              },
+            ),
+          },
+          child: TextField(
+            controller: controller,
+            onChanged: onChanged,
+            onSubmitted: (_) => FocusManager.instance.primaryFocus?.nextFocus(),
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: hint,
+              prefixIcon: const Icon(
+                Icons.search_rounded,
+                color: AppColors.textSecondary,
+                size: 20,
+              ),
+              suffixIcon: controller.text.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      color: AppColors.textSecondary,
+                      onPressed: onClear,
+                    ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: Insets.lg,
+                vertical: Insets.md,
+              ),
+            ),
+          ),
         ),
       ),
     );

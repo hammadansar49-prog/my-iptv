@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -252,14 +253,19 @@ class _AnnouncementModalState extends ConsumerState<_AnnouncementModal> {
 
 // ---- Subscription ended -------------------------------------------------------
 
-class _SubscriptionEnded extends StatelessWidget {
+class _SubscriptionEnded extends ConsumerWidget {
   const _SubscriptionEnded({required this.whatsapp});
   final String? whatsapp;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final text = Theme.of(context).textTheme;
-    final digits = (whatsapp ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    var digits = (whatsapp ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) digits = '923341100761';
+    const renew = 'Hi, I would like to renew my MY IPTV subscription.';
+    // Android TV has no WhatsApp: show the number and a QR code right here
+    // (this screen sits above the Navigator, so no dialog).
+    final tv = ref.watch(isTvProvider);
     // Opaque and swallowing every touch: the app underneath must not be
     // usable, and there is deliberately no close button.
     return ColoredBox(
@@ -279,17 +285,37 @@ class _SubscriptionEnded extends StatelessWidget {
                 style: text.bodyMedium,
               ),
               const SizedBox(height: Insets.xl),
-              FilledButton.icon(
-                autofocus: true,
-                onPressed: digits.isEmpty
-                    ? null
-                    : () => launchUrl(
-                          Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent('Hi, I would like to renew my MY IPTV subscription.')}'),
-                          mode: LaunchMode.externalApplication,
-                        ),
-                icon: const Icon(Icons.chat_rounded),
-                label: const Text('Contact on WhatsApp'),
-              ),
+              if (tv)
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      color: Colors.white,
+                      child: QrImageView(
+                        data: 'https://wa.me/$digits?text=${Uri.encodeComponent(renew)}',
+                        size: 160,
+                      ),
+                    ),
+                    const SizedBox(width: Insets.lg),
+                    Expanded(
+                      child: Text(
+                        'WhatsApp: +$digits\nName: theottdeals\n\n'
+                        'Scan with your phone to message us for renewal.',
+                        style: text.bodyLarge,
+                      ),
+                    ),
+                  ],
+                )
+              else
+                FilledButton.icon(
+                  autofocus: true,
+                  onPressed: () => launchUrl(
+                    Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(renew)}'),
+                    mode: LaunchMode.externalApplication,
+                  ),
+                  icon: const Icon(Icons.chat_rounded),
+                  label: const Text('Contact on WhatsApp'),
+                ),
             ],
           ),
         ),

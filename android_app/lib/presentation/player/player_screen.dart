@@ -60,6 +60,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   bool _controlsVisible = true;
   bool _locked = false;
   double? _brightness;
+
+  /// Swipe gestures (phone): right half = volume, left half = brightness.
+  /// [_swipeKind] drives the on-screen level indicator while dragging.
+  double _volume = 100;
+  String? _swipeKind;
+  double _swipeLevel = 0;
+  Timer? _swipeHide;
   VideoAspect _aspect = VideoAspect.original;
 
   /// Bumped on every aspect change so the badge replays its animation.
@@ -549,6 +556,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (PipService.onDismissed == _onPipDismissed) PipService.onDismissed = null;
     unawaited(PipService.configure(autoEnter: false));
     _hideTimer?.cancel();
+    _swipeHide?.cancel();
     _historyTicker?.cancel();
 
     // Final flush, bypassing the throttle, so the exact stop position sticks.
@@ -609,6 +617,45 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           },
           child: GestureDetector(
             onTap: _toggleControls,
+            onVerticalDragStart: _locked || _isTv
+                ? null
+                : (d) {
+                    final width = MediaQuery.sizeOf(context).width;
+                    _swipeHide?.cancel();
+                    setState(() {
+                      _swipeKind =
+                          d.globalPosition.dx > width / 2 ? 'volume' : 'brightness';
+                      _swipeLevel = _swipeKind == 'volume'
+                          ? _volume / 100
+                          : (_brightness ?? 0.5);
+                    });
+                  },
+            onVerticalDragUpdate: _locked || _isTv
+                ? null
+                : (d) {
+                    final kind = _swipeKind;
+                    if (kind == null) return;
+                    // A full swipe over ~70% of the screen height = 0→100%.
+                    final h = MediaQuery.sizeOf(context).height;
+                    final level =
+                        (_swipeLevel - (d.primaryDelta ?? 0) / (h * 0.7))
+                            .clamp(0.0, 1.0);
+                    setState(() => _swipeLevel = level);
+                    if (kind == 'volume') {
+                      _volume = level * 100;
+                      unawaited(_player.setVolume(_volume));
+                    } else {
+                      unawaited(_setBrightness(level));
+                    }
+                  },
+            onVerticalDragEnd: _locked || _isTv
+                ? null
+                : (_) {
+                    _swipeHide?.cancel();
+                    _swipeHide = Timer(const Duration(milliseconds: 700), () {
+                      if (mounted) setState(() => _swipeKind = null);
+                    });
+                  },
             onDoubleTapDown: _locked
                 ? null
                 : (details) {
@@ -633,6 +680,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
                 // In PiP only the video is drawn: no controls or overlays.
                 if (!_inPip) ...[
+                if (_swipeKind != null)
+                  IgnorePointer(
+                    child: Center(
+                      child: _SwipeLevel(
+                        icon: _swipeKind == 'volume'
+                            ? (_swipeLevel == 0
+                                ? Icons.volume_off_rounded
+                                : Icons.volume_up_rounded)
+                            : Icons.brightness_6_rounded,
+                        level: _swipeLevel,
+                      ),
+                    ),
+                  ),
                 if (_aspectShown > 0)
                   IgnorePointer(
                     // Above centre: the middle of the screen is where the
@@ -890,6 +950,51 @@ class _AspectBadgeState extends State<_AspectBadge>
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Level shown while swiping for volume/brightness.
+class _SwipeLevel extends StatelessWidget {
+  const _SwipeLevel({required this.icon, required this.level});
+
+  final IconData icon;
+  final double level;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 180,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 28),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: level,
+              minHeight: 5,
+              color: AppColors.accent,
+              backgroundColor: Colors.white24,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${(level * 100).round()}%',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
