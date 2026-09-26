@@ -188,6 +188,27 @@ class PlayerController extends ChangeNotifier {
     await _tuneForStreaming(player);
   }
 
+  /// Live sports (beIN HD/FHD: 50fps, high bitrate) juddered because the
+  /// decoder could not keep up. For LIVE only, skip H.264's in-loop
+  /// deblocking and allow the decoder's fast paths — a big decode speed-up
+  /// that is barely visible on a moving picture — and a cheap scaler.
+  /// Movies/episodes keep full quality.
+  static Future<void> _tuneForLive(Player player, bool live) async {
+    final platform = player.platform;
+    if (platform is! NativePlayer) return;
+    final props = <String, String>{
+      'vd-lavc-skiploopfilter': live ? 'all' : 'default',
+      'vd-lavc-fast': live ? 'yes' : 'no',
+      'scale': live ? 'bilinear' : 'spline36',
+      'dscale': live ? 'bilinear' : 'mitchell',
+    };
+    for (final e in props.entries) {
+      try {
+        await platform.setProperty(e.key, e.value);
+      } catch (_) {}
+    }
+  }
+
   /// libmpv network/cache tuning for smooth live TV (sports, far-away
   /// international channels). Read ahead ~20s, wait for ~2s of buffer
   /// before starting instead of starting on a near-empty cache and
@@ -388,6 +409,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> _openMedia(PlaybackRequest request, int generation) async {
     final player = _player;
     if (player == null) return;
+    await _tuneForLive(player, request.isLive);
     _pendingStart = !request.isLive && request.startAt > const Duration(seconds: 5)
         ? request.startAt
         : null;
