@@ -199,12 +199,17 @@ class PlayerController extends ChangeNotifier {
     if (platform is! NativePlayer) return;
     const props = <String, String>{
       'cache': 'yes',
-      'cache-secs': '20',
-      'demuxer-readahead-secs': '20',
+      'cache-secs': '30',
+      'demuxer-readahead-secs': '30',
       'cache-pause-initial': 'yes',
-      'cache-pause-wait': '2',
+      // On an underrun, refill ~5s before resuming: one short pause instead
+      // of a string of stutters on a slow connection.
+      'cache-pause-wait': '5',
       'network-timeout': '15',
-      'hls-bitrate': 'max',
+      // mpv does not adapt HLS quality on the fly; 'max' forced the top
+      // (often 4K/FHD) variant and buffered on slow internet. Cap it at the
+      // best variant up to ~5 Mbps: full HD quality, far fewer stalls.
+      'hls-bitrate': '5000000',
       'demuxer-lavf-o': 'fflags=+discardcorrupt',
       'vd-lavc-threads': '0',
       'framedrop': 'vo',

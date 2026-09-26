@@ -104,6 +104,13 @@ class _LiveTvScreenState extends ConsumerState<LiveTvScreen>
   }
 
   Future<void> _play(LiveChannel channel) async {
+    // OK on the channel that is already playing = fullscreen (TV remote:
+    // the small fullscreen icon on the video is hard to reach).
+    if (_current?.streamId == channel.streamId &&
+        (_player?.state.hasMedia ?? false)) {
+      _toggleFullscreen();
+      return;
+    }
     final repo = ref.read(contentRepositoryProvider);
     if (repo == null) return;
 
