@@ -22,6 +22,7 @@ import '../../data/models/library.dart';
 import '../../data/repositories/library_repository_impl.dart';
 import '../providers.dart';
 import 'tracks_dialog.dart';
+import 'episodes_panel.dart';
 import '../../services/download/download_manager.dart';
 import '../widgets/download_button.dart';
 import 'autoplay.dart';
@@ -69,6 +70,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   late final LibraryRepositoryImpl _library;
   late final bool _isTv;
+
+  /// The series being played and how to build a request for any of its
+  /// episodes, for the in-player Episodes panel.
+  SeriesDetail? _seriesDetail;
+  PlaybackRequest Function(Episode)? _episodeRequest;
 
   /// Picture-in-Picture: available on this device, and currently in it.
   bool _pipSupported = false;
@@ -231,7 +237,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (_upNextResolved) return;
     _upNextResolved = true;
 
-    final replay = widget.request.replay;
+    final replay = _player.state.request?.replay ?? widget.request.replay;
     if (replay == null ||
         replay.section != ContentSection.series ||
         replay.seriesId == null) {
@@ -307,7 +313,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (state.duration <= Duration.zero) return;
     unawaited(
       _library.recordProgress(
-        widget.request.toHistoryEntry(),
+        // The episode actually playing — after Next/Episodes it is no longer
+        // the one this screen was opened with.
+        state.request!.toHistoryEntry(),
         position: state.position,
         duration: state.duration,
       ),
@@ -390,10 +398,42 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   Future<void> _showTracksSheet() => showTracksDialog(context, _player);
 
+  /// Episodes panel over the video (which keeps playing). Until the series
+  /// has been resolved there is nothing to list, so it falls back to the
+  /// series page as before.
+  Future<void> _showEpisodes() async {
+    final detail = _seriesDetail;
+    final build = _episodeRequest;
+    if (detail == null || build == null) {
+      await _resolveNeighbours();
+      if (!mounted) return;
+      if (_seriesDetail == null || _episodeRequest == null) {
+        Navigator.of(context).maybePop();
+        return;
+      }
+    }
+    final current = _player.state.request?.replay?.episodeId ??
+        widget.request.replay?.episodeId ??
+        '';
+    final picked = await showEpisodesPanel(
+      context,
+      detail: _seriesDetail!,
+      currentEpisodeId: current,
+      historyFor: _library.historyFor,
+    );
+    if (picked == null || !mounted || picked.id == current) return;
+    _recordProgress();
+    final saved = _library.historyFor(picked.key);
+    final request = _episodeRequest!(picked);
+    await _playRequest(saved != null && saved.isContinueWatching
+        ? request.copyWith(startAt: saved.resumeAt)
+        : request);
+  }
+
   /// Resolve the previous/next episode so the skip buttons are live during
   /// playback, not only once an episode ends.
   Future<void> _resolveNeighbours() async {
-    final replay = widget.request.replay;
+    final replay = _player.state.request?.replay ?? widget.request.replay;
     if (replay == null ||
         replay.section != ContentSection.series ||
         replay.seriesId == null) {
@@ -437,6 +477,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     );
 
     if (!mounted) return;
+    _seriesDetail = detail;
+    _episodeRequest = build;
     setState(() {
       _previous = index > 0 ? build(ordered[index - 1]) : null;
       _upNext = index + 1 < ordered.length ? build(ordered[index + 1]) : null;
@@ -657,7 +699,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                     onSpeed: _showSpeedSheet,
                     onTracks: _showTracksSheet,
                     onEpisodes: widget.request.section == ContentSection.series
-                        ? () => Navigator.of(context).maybePop()
+                        ? _showEpisodes
                         : null,
                     onPrevious: _previous == null
                         ? null

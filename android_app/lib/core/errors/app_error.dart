@@ -63,6 +63,15 @@ class AppError implements Exception {
     'Invalid credentials — please check your Server URL, Username and Password and try again.',
   );
 
+  /// The device itself has no network (Wi-Fi/ethernet/mobile all off).
+  /// Checked before blaming the server: offline, a DNS lookup fails and
+  /// used to read "Server address not found — check the Server URL".
+  static const offline = AppError(
+    AppErrorKind.network,
+    'No internet connection — please check your Wi-Fi or network and try again.',
+    retryable: true,
+  );
+
   static const unplayable = AppError(
     AppErrorKind.playback,
     'Unable to play this stream.',

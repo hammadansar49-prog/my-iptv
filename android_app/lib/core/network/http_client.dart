@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 
 import '../constants/app_constants.dart';
@@ -102,6 +103,9 @@ class HttpClient {
       Log.e('HttpClient',
           'DioException(${e.type}) after ${sw.elapsedMilliseconds}ms for ${Log.redact(url)}: ${e.message}');
       if (CancelToken.isCancel(e)) rethrow;
+      if (e.type != DioExceptionType.badResponse && await isOffline()) {
+        throw AppError.offline;
+      }
       switch (e.type) {
         case DioExceptionType.connectionTimeout:
         case DioExceptionType.receiveTimeout:
@@ -128,4 +132,14 @@ class HttpClient {
   }
 
   void close() => _dio.close(force: true);
+}
+
+/// True when no network interface is up at all.
+Future<bool> isOffline() async {
+  try {
+    final r = await Connectivity().checkConnectivity();
+    return r.every((c) => c == ConnectivityResult.none);
+  } catch (_) {
+    return false;
+  }
 }

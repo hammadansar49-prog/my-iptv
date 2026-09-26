@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/api/rtdb_api.dart';
 import '../home/home_feed.dart';
+import '../providers.dart';
 import '../widgets/network_artwork.dart';
 import 'license_state.dart';
 import 'license_widgets.dart';
@@ -39,7 +40,12 @@ class _PlansScreenState extends ConsumerState<PlansScreen> {
     );
     if (ok == true && mounted) {
       final note = LicenseActions.lastActivationNote;
-      _snack('${plan.label} activated.${note == null ? '' : ' $note'}');
+      final exp = ref.read(licenseRepositoryProvider).current?.expiresAt;
+      final until = exp == null
+          ? ''
+          : ' Valid until ${exp.day}/${exp.month}/${exp.year}'
+              ' (${exp.difference(DateTime.now()).inDays} days left).';
+      _snack('${plan.label} activated.$until${note == null ? '' : ' $note'}');
     }
   }
 
@@ -480,7 +486,7 @@ class _PlanCard extends StatelessWidget {
                       children: [
                         Expanded(
                           child: _CardButton(
-                            label: 'Activate Plan',
+                            label: active ? 'Extend Plan' : 'Activate Plan',
                             background: Colors.white,
                             foreground: Colors.black,
                             onTap: onActivate,

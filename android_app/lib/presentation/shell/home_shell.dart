@@ -128,32 +128,44 @@ class _FloatingNavBar extends StatelessWidget {
         // (extendBody), and a live blur there was re-run every scroll frame,
         // which made scrolling stutter. A dense translucent fill reads as
         // glass without the per-frame cost.
-        child: ClipRRect(
-          borderRadius: radius,
-          child: Container(
-            // 66 was 5px too short for a selected phone tab: icon (22) + its
-            // selected-state padding (8+8) + the label gap (2) + the label
-            // text overflowed the Column's available height by exactly
-            // 5.0px (confirmed via a real-device layout exception), which
-            // painted a yellow/black overflow banner over the nav bar.
-            height: tv ? 76 : 72,
-            decoration: BoxDecoration(
-              color: const Color(0xF21B1B1D),
-              borderRadius: radius,
-              border: Border.all(color: const Color(0x1FFFFFFF)),
+        // On a TV/landscape screen a full-width bar covered a whole row of
+        // content; keep it a compact centred pill there.
+        child: Center(
+          heightFactor: 1,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width >= 900
+                  ? 560
+                  : double.infinity,
             ),
-            padding: const EdgeInsets.symmetric(horizontal: Insets.sm),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                for (var i = 0; i < tabs.length; i++)
-                  _NavItem(
-                    spec: tabs[i],
-                    selected: i == index,
-                    onTap: () => onSelect(i),
-                    tv: tv,
-                  ),
-              ],
+            child: ClipRRect(
+              borderRadius: radius,
+              child: Container(
+                // 66 was 5px too short for a selected phone tab: icon (22) + its
+                // selected-state padding (8+8) + the label gap (2) + the label
+                // text overflowed the Column's available height by exactly
+                // 5.0px (confirmed via a real-device layout exception), which
+                // painted a yellow/black overflow banner over the nav bar.
+                height: tv ? 76 : 72,
+                decoration: BoxDecoration(
+                  color: const Color(0xF21B1B1D),
+                  borderRadius: radius,
+                  border: Border.all(color: const Color(0x1FFFFFFF)),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: Insets.sm),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    for (var i = 0; i < tabs.length; i++)
+                      _NavItem(
+                        spec: tabs[i],
+                        selected: i == index,
+                        onTap: () => onSelect(i),
+                        tv: tv,
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),

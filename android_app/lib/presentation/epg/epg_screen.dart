@@ -327,17 +327,7 @@ class _EpgScreenState extends ConsumerState<EpgScreen>
       );
     }
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            _buildPlayer(),
-            _buildHeader(),
-            _buildRuler(),
-            Expanded(
-              child: searching
+    final guide = searching
                   ? _buildSearchBody(pinIds)
                   : async.when(
                       loading: () => const _GuideSkeleton(),
@@ -360,8 +350,59 @@ class _EpgScreenState extends ConsumerState<EpgScreen>
                               pinned: pinned,
                               pinIds: pinIds,
                             ),
-                    ),
+                    );
+
+    // Landscape / TV: the player sits on the left and the guide (header,
+    // search, categories, channels) fills the right, so everything is on
+    // one screen. Stacked, a 16:9 player the width of a TV left no room
+    // for the guide at all.
+    final size = MediaQuery.sizeOf(context);
+    if (size.width > size.height && size.width >= 640) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: SafeArea(
+          bottom: false,
+          child: Padding(
+            // Clear of the shell's floating nav bar.
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.paddingOf(context).bottom + 96,
             ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: size.width * 0.38,
+                  child: Padding(
+                    padding: const EdgeInsets.all(Insets.md),
+                    child: _buildPlayer(),
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      _buildHeader(),
+                      _buildRuler(),
+                      Expanded(child: guide),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            _buildPlayer(),
+            _buildHeader(),
+            _buildRuler(),
+            Expanded(child: guide),
           ],
         ),
       ),

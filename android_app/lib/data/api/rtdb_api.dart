@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/errors/app_error.dart';
+import '../../core/network/http_client.dart' show isOffline;
 import '../../core/utils/logger.dart';
 import '../models/json.dart';
 
@@ -312,6 +313,7 @@ class RtdbApi {
     } on AppError {
       rethrow;
     } on DioException catch (e) {
+      if (await isOffline()) throw AppError.offline;
       throw AppError.fromTransport(e.error ?? e, detail: e.message);
     }
   }
@@ -379,7 +381,11 @@ class RtdbApi {
   /// documented in AUDIT.md §6 — in particular, a key's expiry clock starts
   /// at first successful verify, not at generation, so unsold keys do not
   /// expire sitting in inventory.
-  Future<LicenseVerdict> verifyKey(String key, String machineId) async {
+  Future<LicenseVerdict> verifyKey(
+    String key,
+    String machineId, {
+    DateTime? extendFrom,
+  }) async {
     final trimmed = normalizeLicenseKey(key);
     if (trimmed.isEmpty) return LicenseVerdict.notFound;
 
@@ -406,7 +412,12 @@ class RtdbApi {
     // 3. Unused -> activate, starting the clock now.
     if (asString(row['status']) == 'unused') {
       final days = asInt(row['duration_days']);
-      final expiresAt = now + days * 24 * 60 * 60 * 1000;
+      // Extending: start from the current plan's expiry when it is later.
+      final base = extendFrom != null &&
+              extendFrom.millisecondsSinceEpoch > now
+          ? extendFrom.millisecondsSinceEpoch
+          : now;
+      final expiresAt = base + days * 24 * 60 * 60 * 1000;
       try {
         await _request('PATCH', path, {
           'status': 'active',

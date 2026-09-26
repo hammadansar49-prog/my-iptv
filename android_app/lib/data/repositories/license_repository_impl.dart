@@ -80,7 +80,16 @@ class LicenseRepositoryImpl implements LicenseRepository {
   @override
   Future<LicenseVerdict> verify(String key) async {
     final machineId = await _identity.machineId();
-    final verdict = await _api.verifyKey(key, machineId);
+    // A new key while a purchased one still runs: its days are added on
+    // top of the time left (Extend Plan), not started from today.
+    final cur = _current;
+    final extendFrom = _paidActive &&
+            cur?.expiresAt != null &&
+            normalizeLicenseKey(key) != _key
+        ? cur!.expiresAt
+        : null;
+    final verdict =
+        await _api.verifyKey(key, machineId, extendFrom: extendFrom);
     if (verdict.valid) {
       _key = normalizeLicenseKey(key);
       _current = verdict;

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -36,12 +38,18 @@ class ProfileScreen extends ConsumerWidget {
     // shell draws over this tab (extendBody) — without both, the title sat
     // inside the status bar and the last settings rows hid under the bar.
     final pad = MediaQuery.paddingOf(context);
+    // TV/landscape: a readable centred column instead of rows stretched
+    // across the whole screen.
+    final side = math.max(
+      Insets.lg,
+      (MediaQuery.sizeOf(context).width - 820) / 2,
+    );
     return Scaffold(
       body: ListView(
         padding: EdgeInsets.fromLTRB(
-          Insets.lg,
+          side,
           pad.top + Insets.sm,
-          Insets.lg,
+          side,
           pad.bottom + 110,
         ),
         children: [

@@ -412,7 +412,10 @@ class _FeaturedCarousel extends ConsumerStatefulWidget {
 }
 
 class _FeaturedCarouselState extends ConsumerState<_FeaturedCarousel> {
-  final _pageController = PageController(viewportFraction: 0.92);
+  /// One big card on a phone; on a landscape/TV screen several posters
+  /// side by side instead of one card the width of the TV.
+  PageController? _controller;
+  PageController get _pageController => _controller!;
   int _page = 0;
   int _itemCount = 0;
   Timer? _autoTimer;
@@ -440,12 +443,12 @@ class _FeaturedCarouselState extends ConsumerState<_FeaturedCarousel> {
   @override
   void dispose() {
     _autoTimer?.cancel();
-    _pageController.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
   void _advance() {
-    if (!mounted || !_pageController.hasClients || _itemCount <= 1) return;
+    if (!mounted || _controller == null || !_pageController.hasClients || _itemCount <= 1) return;
     // Nobody is looking: the player or a detail page is on top, or the
     // carousel has scrolled away. Animating then only burns frames (and
     // swaps the backdrop behind the user's back).
@@ -507,8 +510,12 @@ class _FeaturedCarouselState extends ConsumerState<_FeaturedCarousel> {
     // The card was sized by the leftover screen height when it lived in a
     // Column; in a scroll view it needs a real height. Portrait-ish like the
     // reference, but never taller than most of the screen (landscape/TV).
-    final cardWidth = size.width * 0.92 - Insets.sm * 2;
-    final height = math.min(cardWidth * 1.4, size.height * 0.62);
+    final wide = size.width > size.height && size.width >= 640;
+    _controller ??= PageController(viewportFraction: wide ? 0.26 : 0.92);
+    final cardWidth = size.width * _pageController.viewportFraction - Insets.sm * 2;
+    final height = wide
+        ? math.min(cardWidth * 1.35, size.height * 0.5)
+        : math.min(cardWidth * 1.4, size.height * 0.62);
 
     return Column(
       children: [
@@ -517,6 +524,7 @@ class _FeaturedCarouselState extends ConsumerState<_FeaturedCarousel> {
           height: height,
           child: PageView.builder(
             controller: _pageController,
+            padEnds: !wide,
             itemCount: items.length,
             onPageChanged: (i) => setState(() => _page = i),
             itemBuilder: (context, i) => Padding(
