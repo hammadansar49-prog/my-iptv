@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -177,7 +178,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildSearchField() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(Insets.lg, Insets.xs, Insets.lg, 0),
-      child: TextField(
+      // TV remote: OK/Enter opens search (a read-only field only reacts to
+      // touch taps), and Up/Down move on instead of acting as cursor keys.
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.select): _openScopedSearch,
+          const SingleActivator(LogicalKeyboardKey.enter): _openScopedSearch,
+          const SingleActivator(LogicalKeyboardKey.numpadEnter):
+              _openScopedSearch,
+          const SingleActivator(LogicalKeyboardKey.gameButtonA):
+              _openScopedSearch,
+        },
+        child: Shortcuts(
+          shortcuts: const {
+            SingleActivator(LogicalKeyboardKey.arrowDown):
+                DirectionalFocusIntent(TraversalDirection.down),
+            SingleActivator(LogicalKeyboardKey.arrowUp):
+                DirectionalFocusIntent(TraversalDirection.up),
+          },
+          child: TextField(
         controller: _searchController,
         readOnly: true,
         onTap: _openScopedSearch,
@@ -214,6 +233,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ),
       ),
+        ),
+      ),
     );
   }
 
@@ -223,20 +244,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (size.width > size.height && size.width >= 900) {
       return Padding(
         padding: const EdgeInsets.only(top: Insets.md, bottom: Insets.sm),
-        child: Wrap(
-          alignment: WrapAlignment.center,
-          spacing: Insets.md,
-          runSpacing: Insets.sm,
-          children: [
-            for (final f in HomeFilter.values)
-              _FilterPill(
-                label: f.label,
-                selected: f == _filter,
-                onTap: () {
-                  if (f != _filter) setState(() => _filter = f);
-                },
-              ),
-          ],
+        // Same 44px pills as the phone row, in one line, centred. (A Wrap
+        // let each pill stretch to the full width — its Container centres
+        // its label and so expands to whatever width it is offered.)
+        child: SizedBox(
+          height: 44,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (final f in HomeFilter.values) ...[
+                if (f != HomeFilter.values.first)
+                  const SizedBox(width: Insets.md),
+                _FilterPill(
+                  label: f.label,
+                  selected: f == _filter,
+                  onTap: () {
+                    if (f != _filter) setState(() => _filter = f);
+                  },
+                ),
+              ],
+            ],
+          ),
         ),
       );
     }
@@ -533,10 +561,10 @@ class _FeaturedCarouselState extends ConsumerState<_FeaturedCarousel> {
     // Column; in a scroll view it needs a real height. Portrait-ish like the
     // reference, but never taller than most of the screen (landscape/TV).
     final wide = size.width > size.height && size.width >= 640;
-    _controller ??= PageController(viewportFraction: wide ? 0.26 : 0.92);
+    _controller ??= PageController(viewportFraction: wide ? 0.2 : 0.92);
     final cardWidth = size.width * _pageController.viewportFraction - Insets.sm * 2;
     final height = wide
-        ? math.min(cardWidth * 1.35, size.height * 0.5)
+        ? math.min(cardWidth * 1.35, size.height * 0.42)
         : math.min(cardWidth * 1.4, size.height * 0.62);
 
     return Column(

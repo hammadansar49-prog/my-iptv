@@ -90,7 +90,7 @@ class _TvCanvas extends StatelessWidget {
 
   final Widget child;
 
-  static const _width = 2048.0;
+  static const _width = 2400.0;
   static const _overscan = EdgeInsets.fromLTRB(48, 24, 48, 28);
 
   @override

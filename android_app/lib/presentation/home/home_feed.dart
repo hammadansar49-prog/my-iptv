@@ -407,8 +407,17 @@ final homeFeaturedProvider =
           .watch(seriesIndexProvider)
           .whenData((s) => firstSeries(s, HomeLimits.featured));
     case HomeFilter.liveTv:
+      // Channels with a real logo only: panels open their lists with
+      // logo-less divider "channels" ("US", "CA"), which made the carousel
+      // a row of grey cards with two letters on them.
       return ref.watch(liveChannelsProvider('')).whenData((c) => [
-            for (final x in c.take(HomeLimits.featured)) FeaturedItem.channel(x)
+            for (final x in c
+                .where((x) {
+                  final l = (x.logo ?? '').trim().toLowerCase();
+                  return l.startsWith('http://') || l.startsWith('https://');
+                })
+                .take(HomeLimits.featured))
+              FeaturedItem.channel(x)
           ]);
     case HomeFilter.all:
       const half = HomeLimits.featured ~/ 2;
