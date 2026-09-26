@@ -157,10 +157,12 @@ class PlayerController extends ChangeNotifier {
   Future<void> _ensurePlayer() async {
     if (_player != null) return;
     final player = Player(
-      configuration: const PlayerConfiguration(
+      configuration: PlayerConfiguration(
         // Keep a modest demuxer cache: large buffers on a phone are the
         // fastest way to an OOM with a 4K stream (spec §46).
-        bufferSize: 32 * 1024 * 1024,
+        // TV boxes have the memory for a bigger read-ahead, which is what
+        // keeps far-away international/sports streams from stuttering.
+        bufferSize: (tvMode ? 96 : 32) * 1024 * 1024,
         logLevel: MPVLogLevel.error,
       ),
     );
@@ -183,6 +185,37 @@ class PlayerController extends ChangeNotifier {
       ),
     );
     _attachListeners(player);
+    await _tuneForStreaming(player);
+  }
+
+  /// libmpv network/cache tuning for smooth live TV (sports, far-away
+  /// international channels). Read ahead ~20s, wait for ~2s of buffer
+  /// before starting instead of starting on a near-empty cache and
+  /// stalling a moment later, tolerate corrupt TS packets instead of
+  /// hiccuping on them, and pick the best HLS variant. Best-effort: an
+  /// unknown option is simply ignored by mpv.
+  static Future<void> _tuneForStreaming(Player player) async {
+    final platform = player.platform;
+    if (platform is! NativePlayer) return;
+    const props = <String, String>{
+      'cache': 'yes',
+      'cache-secs': '20',
+      'demuxer-readahead-secs': '20',
+      'cache-pause-initial': 'yes',
+      'cache-pause-wait': '2',
+      'network-timeout': '15',
+      'hls-bitrate': 'max',
+      'demuxer-lavf-o': 'fflags=+discardcorrupt',
+      'vd-lavc-threads': '0',
+      'framedrop': 'vo',
+    };
+    for (final e in props.entries) {
+      try {
+        await platform.setProperty(e.key, e.value);
+      } catch (err) {
+        Log.w(_tag, 'mpv option ${e.key} not applied: $err');
+      }
+    }
   }
 
   void _attachListeners(Player player) {
