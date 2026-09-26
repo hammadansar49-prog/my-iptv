@@ -74,6 +74,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// The series being played and how to build a request for any of its
   /// episodes, for the in-player Episodes panel.
   SeriesDetail? _seriesDetail;
+  String? _currentEpisodeId;
   PlaybackRequest Function(Episode)? _episodeRequest;
 
   /// Picture-in-Picture: available on this device, and currently in it.
@@ -398,9 +399,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   Future<void> _showTracksSheet() => showTracksDialog(context, _player);
 
-  /// Episodes panel over the video (which keeps playing). Until the series
-  /// has been resolved there is nothing to list, so it falls back to the
-  /// series page as before.
+  /// Episodes panel over the video (which keeps playing).
   Future<void> _showEpisodes() async {
     final detail = _seriesDetail;
     final build = _episodeRequest;
@@ -408,12 +407,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       await _resolveNeighbours();
       if (!mounted) return;
       if (_seriesDetail == null || _episodeRequest == null) {
-        Navigator.of(context).maybePop();
+        // Never close the video just because the list is unavailable.
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(
+            content: Text('The episode list is not available for this video.'),
+          ));
         return;
       }
     }
     final current = _player.state.request?.replay?.episodeId ??
-        widget.request.replay?.episodeId ??
+        _currentEpisodeId ??
         '';
     final picked = await showEpisodesPanel(
       context,
@@ -433,19 +437,34 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// Resolve the previous/next episode so the skip buttons are live during
   /// playback, not only once an episode ends.
   Future<void> _resolveNeighbours() async {
-    final replay = _player.state.request?.replay ?? widget.request.replay;
-    if (replay == null ||
-        replay.section != ContentSection.series ||
-        replay.seriesId == null) {
-      return;
-    }
+    final current = _player.state.request ?? widget.request;
+    final replay = current.replay;
+    if (current.section != ContentSection.series) return;
     final repo = ref.read(contentRepositoryProvider);
     if (repo == null) return;
+
+    // Played from Downloads, or an older Continue Watching row, carries no
+    // (or an incomplete) replay ref. The provider's episode id is in the
+    // stream URL either way, and the series is found by its name.
+    final episodeId = replay?.episodeId ??
+        RegExp(r'/series/[^/]+/[^/]+/(\d+)\.').firstMatch(current.url)?[1];
+    if (episodeId == null) return;
 
     final all = await repo.seriesList();
     Series? match;
     for (final s in all) {
-      if (s.seriesId == replay.seriesId) match = s;
+      if (replay?.seriesId != null && s.seriesId == replay!.seriesId) {
+        match = s;
+      }
+    }
+    if (match == null) {
+      final name = current.title.trim().toLowerCase();
+      for (final s in all) {
+        if (s.name.trim().toLowerCase() == name) {
+          match = s;
+          break;
+        }
+      }
     }
     if (match == null || !mounted) return;
     final detail = await repo.seriesDetail(match);
@@ -455,8 +474,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     for (final n in detail.seasonNumbers) {
       ordered.addAll(detail.seasons[n] ?? const []);
     }
-    final index = ordered.indexWhere((e) => e.id == replay.episodeId);
+    final index = ordered.indexWhere((e) => e.id == episodeId);
     if (index < 0) return;
+    _currentEpisodeId = episodeId;
 
     PlaybackRequest build(Episode e) => PlaybackRequest(
       url: repo.episodeUrl(e),

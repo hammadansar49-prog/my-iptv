@@ -993,7 +993,7 @@ class ContinueWatchingSection extends ConsumerWidget {
     for (final e in history) {
       final r = _Resumable.from(e, downloads);
       if (r == null) continue;
-      if (!seen.add(_identity(e))) continue;
+      if (!seen.add(_identity(e, downloads))) continue;
       final keep = switch (filter) {
         HomeFilter.all => true,
         HomeFilter.movies || HomeFilter.ott =>
@@ -1040,9 +1040,38 @@ class ContinueWatchingSection extends ConsumerWidget {
   }
 }
 
-/// What makes two history rows "the same thing" for Continue Watching.
-String _identity(HistoryEntry e) =>
-    '${e.title.trim().toLowerCase()}|${(e.subtitle ?? '').trim().toLowerCase()}';
+final _streamIdInUrl = RegExp(r'/(movie|series)/[^/]+/[^/]+/(\d+)\.');
+
+/// What makes two history rows "the same thing" for Continue Watching: the
+/// provider's own movie/episode id, wherever the row came from (detail
+/// page, player Next, Episodes panel or a download — each saves under its
+/// own key and with differently worded subtitles). Title as a last resort.
+String _identity(HistoryEntry e, List<DownloadItem> downloads) {
+  // A series shows once, as its most recently watched episode (history is
+  // most-recent-first) — like any streaming app's Continue Watching.
+  final series = e.key.startsWith('episode:') ||
+      e.replay?.section == ContentSection.series ||
+      (e.key.startsWith('download:') &&
+          downloads.any((d) => 'download:${d.id}' == e.key && d.isEpisode));
+  // By name: rows from Downloads carry no series id, and the name is the
+  // same on every path (detail page, player, downloads).
+  if (series) return 'sr:${e.title.trim().toLowerCase()}';
+  final k = e.key;
+  if (k.startsWith('movie:')) return 'mv:${k.substring(6)}';
+  final r = e.replay;
+  if (r != null && r.section == ContentSection.movies) {
+    return 'mv:${r.streamId}';
+  }
+  if (k.startsWith('download:')) {
+    final id = k.substring(9);
+    for (final d in downloads) {
+      if (d.id != id) continue;
+      final m = _streamIdInUrl.firstMatch(d.url);
+      if (m != null) return 'mv:${m[2]}';
+    }
+  }
+  return e.title.trim().toLowerCase();
+}
 
 class _ContinueCard extends ConsumerWidget {
   const _ContinueCard({
@@ -1115,9 +1144,10 @@ class _ContinueCard extends ConsumerWidget {
     final entry = item.entry;
     // Older duplicates of the same title go too, or one would pop back up.
     final library = ref.read(libraryRepositoryProvider);
-    final id = _identity(entry);
+    final downloads = ref.read(downloadManagerProvider).items;
+    final id = _identity(entry, downloads);
     for (final h in library.continueWatching()) {
-      if (_identity(h) == id) library.removeHistory(h.key);
+      if (_identity(h, downloads) == id) library.removeHistory(h.key);
     }
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
