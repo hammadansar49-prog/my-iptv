@@ -43,8 +43,9 @@ class PlaybackRequest {
   /// What actually gets handed to the media engine.
   String get resolvedSource => localFile ?? url;
 
-  PlaybackRequest copyWith({Duration? startAt}) => PlaybackRequest(
-        url: url,
+  PlaybackRequest copyWith({Duration? startAt, String? url}) =>
+      PlaybackRequest(
+        url: url ?? this.url,
         title: title,
         subtitle: subtitle,
         thumb: thumb,

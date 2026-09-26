@@ -230,6 +230,7 @@ class PlayerController extends ChangeNotifier {
       _set(_state.copyWith(
         phase: playing ? PlaybackPhase.playing : PlaybackPhase.paused,
       ));
+      if (playing) _rememberFormat();
     });
 
     sub(player.stream.position, (position) {
@@ -319,6 +320,7 @@ class PlayerController extends ChangeNotifier {
   /// Player instance is reused, so the video surface never tears down.
   Future<void> open(PlaybackRequest request) async {
     if (_disposed) return;
+    request = _preferredFormat(request);
     final generation = ++_generation;
 
     _cancelTimers();
@@ -498,11 +500,45 @@ class PlayerController extends ChangeNotifier {
     _stallWatchdog?.cancel();
     unawaited(() async {
       final keepAttempt = attempt;
-      await open(request.copyWith(startAt: resumeFrom));
+      // Live: alternate between the panel's HLS (.m3u8) and raw MPEG-TS
+      // (.ts) on each retry. Many panels' HLS output is broken for some
+      // (often international) channels that play fine as .ts — retrying
+      // the same .m3u8 just failed three times ("Unable to play").
+      final url = request.isLive ? _swapLiveFormat(request.url) : request.url;
+      await open(request.copyWith(startAt: resumeFrom, url: url));
       if (!_disposed) {
         _set(_state.copyWith(retryAttempt: keepAttempt));
       }
     }());
+  }
+
+  /// Xtream live links only (".../live/user/pass/123.m3u8"); user-added
+  /// M3U/single-channel links are left exactly as entered.
+  static bool _isXtreamLive(String url) =>
+      url.contains('/live/') && (url.endsWith('.m3u8') || url.endsWith('.ts'));
+
+  static String _stem(String url) =>
+      url.endsWith('.m3u8') ? url.substring(0, url.length - 5) : url.substring(0, url.length - 3);
+
+  static String _swapLiveFormat(String url) {
+    if (!_isXtreamLive(url)) return url;
+    return url.endsWith('.m3u8') ? '${_stem(url)}.ts' : '${_stem(url)}.m3u8';
+  }
+
+  /// The format each channel last actually played in, so a channel that
+  /// only works as .ts opens as .ts next time instead of failing first.
+  static final Map<String, String> _liveFormat = {};
+
+  static PlaybackRequest _preferredFormat(PlaybackRequest r) {
+    if (!r.isLive || !_isXtreamLive(r.url)) return r;
+    final ext = _liveFormat[_stem(r.url)];
+    return ext == null ? r : r.copyWith(url: '${_stem(r.url)}.$ext');
+  }
+
+  void _rememberFormat() {
+    final r = _state.request;
+    if (r == null || !r.isLive || !_isXtreamLive(r.url)) return;
+    _liveFormat[_stem(r.url)] = r.url.endsWith('.ts') ? 'ts' : 'm3u8';
   }
 
   /// Manual retry from the error overlay.
