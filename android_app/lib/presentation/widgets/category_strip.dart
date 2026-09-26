@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'tv_text_gate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_colors.dart';
@@ -88,50 +88,31 @@ class ScopedSearchField extends StatelessWidget {
         Insets.lg,
         Insets.sm,
       ),
-      // TV remote: a text field eats Up/Down as cursor keys, which trapped
-      // the focus in the search box. Up/Down leave the field instead, and
-      // Back/Escape just drops focus (closing the keyboard).
-      child: Shortcuts(
-        shortcuts: const {
-          SingleActivator(LogicalKeyboardKey.arrowDown): DirectionalFocusIntent(
-            TraversalDirection.down,
-          ),
-          SingleActivator(LogicalKeyboardKey.arrowUp): DirectionalFocusIntent(
-            TraversalDirection.up,
-          ),
-        },
-        child: Actions(
-          actions: {
-            DismissIntent: CallbackAction<DismissIntent>(
-              onInvoke: (_) {
-                FocusManager.instance.primaryFocus?.unfocus();
-                return null;
-              },
+      // TV remote: see TvTextGate — OK starts typing, Up/Down move on.
+      child: TvTextGate(
+        builder: (node, done) => TextField(
+          controller: controller,
+          focusNode: node,
+          onChanged: onChanged,
+          onSubmitted: (_) => done(),
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: hint,
+            prefixIcon: const Icon(
+              Icons.search_rounded,
+              color: AppColors.textSecondary,
+              size: 20,
             ),
-          },
-          child: TextField(
-            controller: controller,
-            onChanged: onChanged,
-            onSubmitted: (_) => FocusManager.instance.primaryFocus?.nextFocus(),
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: hint,
-              prefixIcon: const Icon(
-                Icons.search_rounded,
-                color: AppColors.textSecondary,
-                size: 20,
-              ),
-              suffixIcon: controller.text.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.close_rounded, size: 18),
-                      color: AppColors.textSecondary,
-                      onPressed: onClear,
-                    ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: Insets.lg,
-                vertical: Insets.md,
-              ),
+            suffixIcon: controller.text.isEmpty
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    color: AppColors.textSecondary,
+                    onPressed: onClear,
+                  ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: Insets.lg,
+              vertical: Insets.md,
             ),
           ),
         ),

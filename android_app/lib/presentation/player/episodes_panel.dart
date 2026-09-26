@@ -4,6 +4,7 @@ import '../../core/theme/app_colors.dart';
 import '../../data/models/content.dart';
 import '../../data/models/library.dart';
 import '../widgets/network_artwork.dart';
+import '../widgets/tv_text_gate.dart';
 import '../widgets/watch_state.dart';
 
 /// The in-player episode list: a panel over the video (which keeps
@@ -146,7 +147,10 @@ class _EpisodesPanelState extends State<_EpisodesPanel> {
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: TextField(
+                  child: TvTextGate(
+                    builder: (node, done) => TextField(
+                    focusNode: node,
+                    onSubmitted: (_) => done(),
                     controller: _search,
                     onChanged: (v) => setState(() => _query = v),
                     style: const TextStyle(color: Colors.white),
@@ -172,6 +176,7 @@ class _EpisodesPanelState extends State<_EpisodesPanel> {
                         borderSide: BorderSide.none,
                       ),
                     ),
+                  ),
                   ),
                 ),
                 if (_query.isEmpty && seasons.length > 1)

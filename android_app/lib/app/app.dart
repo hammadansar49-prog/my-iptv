@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../core/theme/app_theme.dart';
 import '../presentation/iptv_live/iptv_live_layer.dart';
 import '../presentation/providers.dart';
+import '../services/player/player_controller.dart';
 import 'router.dart';
 
 class TheOttDealsApp extends ConsumerWidget {
@@ -14,6 +15,7 @@ class TheOttDealsApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isTv = ref.watch(isTvProvider);
+    PlayerController.tvMode = isTv;
     final router = ref.watch(routerProvider);
 
     return MaterialApp.router(

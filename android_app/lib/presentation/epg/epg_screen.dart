@@ -52,7 +52,9 @@ class _EpgScreenState extends ConsumerState<EpgScreen>
   static const _pxPerMinute = 4.0;
   static const _slotMinutes = 30;
   static const _slotWidth = _slotMinutes * _pxPerMinute;
-  static const _channelColumnWidth = 132.0;
+  // Android TV: a wider name column so channel names can be drawn large
+  // enough to read (they were 11.5px on a scaled-down TV canvas).
+  static double get _channelColumnWidth => PlayerController.tvMode ? 250 : 132;
   static const _rowHeight = 68.0;
   static const _groupHeaderHeight = 26.0;
 
@@ -465,6 +467,9 @@ class _EpgScreenState extends ConsumerState<EpgScreen>
                         controller: _searchController,
                         focusNode: _searchFocus,
                         onChanged: _onQueryChanged,
+                        // Keyboard's Search/Done: leave the field so the TV
+                        // remote can move down into the results.
+                        onSubmitted: (_) => _searchFocus.nextFocus(),
                         textInputAction: TextInputAction.search,
                         style: const TextStyle(color: AppColors.textPrimary),
                         decoration: InputDecoration(
@@ -674,7 +679,7 @@ class _EpgScreenState extends ConsumerState<EpgScreen>
       color: AppColors.background,
       child: Row(
         children: [
-          const SizedBox(width: _channelColumnWidth),
+          SizedBox(width: _channelColumnWidth),
           Expanded(
             child: SingleChildScrollView(
               controller: _timelineController,
@@ -987,7 +992,7 @@ class _GuideRowState extends ConsumerState<_GuideRow> {
                           overflow: TextOverflow.ellipsis,
                           style: text.bodySmall?.copyWith(
                             color: AppColors.textPrimary,
-                            fontSize: 11.5,
+                            fontSize: PlayerController.tvMode ? 20 : 11.5,
                             height: 1.15,
                           ),
                         ),

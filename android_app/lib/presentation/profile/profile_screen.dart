@@ -38,21 +38,11 @@ class ProfileScreen extends ConsumerWidget {
     // shell draws over this tab (extendBody) — without both, the title sat
     // inside the status bar and the last settings rows hid under the bar.
     final pad = MediaQuery.paddingOf(context);
-    // TV/landscape: a readable centred column instead of rows stretched
-    // across the whole screen.
-    final side = math.max(
-      Insets.lg,
-      (MediaQuery.sizeOf(context).width - 820) / 2,
-    );
-    return Scaffold(
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(
-          side,
-          pad.top + Insets.sm,
-          side,
-          pad.bottom + 110,
-        ),
-        children: [
+    final size = MediaQuery.sizeOf(context);
+    // Android TV / landscape: two columns — account on the left, settings
+    // on the right — instead of the phone's single long list.
+    final wide = size.width > size.height && size.width >= 900;
+    final accountPart = <Widget>[
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -214,6 +204,8 @@ class ProfileScreen extends ConsumerWidget {
             const SizedBox(height: Insets.xl),
           ],
 
+    ];
+    final settingsPart = <Widget>[
           Text('Settings', style: text.headlineSmall),
           const SizedBox(height: Insets.xs),
           Text('Customize how the app fetches, plays and protects your content.',
@@ -334,7 +326,47 @@ class ProfileScreen extends ConsumerWidget {
               ],
             ),
           ),
-        ],
+    ];
+    if (wide) {
+      final side = math.max(Insets.xl, (size.width - 1500) / 2);
+      Widget column(List<Widget> children) => ListView(
+            padding: EdgeInsets.fromLTRB(
+              Insets.md,
+              pad.top + Insets.sm,
+              Insets.md,
+              pad.bottom + 110,
+            ),
+            children: children,
+          );
+      return Scaffold(
+        body: Padding(
+          padding: EdgeInsets.symmetric(horizontal: side),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 5, child: column(accountPart)),
+              const SizedBox(width: Insets.xl),
+              Expanded(
+                flex: 6,
+                child: column([
+                  SizedBox(height: Insets.xl * 2),
+                  ...settingsPart,
+                ]),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return Scaffold(
+      body: ListView(
+        padding: EdgeInsets.fromLTRB(
+          Insets.lg,
+          pad.top + Insets.sm,
+          Insets.lg,
+          pad.bottom + 110,
+        ),
+        children: [...accountPart, ...settingsPart],
       ),
     );
   }

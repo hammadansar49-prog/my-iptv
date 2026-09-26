@@ -16,6 +16,7 @@ import '../../data/models/library.dart';
 import '../auth/auth_controller.dart';
 import '../license/license_widgets.dart';
 import '../providers.dart';
+import '../../services/player/player_controller.dart';
 import '../widgets/network_artwork.dart';
 import 'home_feed.dart';
 import 'home_rows.dart';
@@ -178,25 +179,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildSearchField() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(Insets.lg, Insets.xs, Insets.lg, 0),
-      // TV remote: OK/Enter opens search (a read-only field only reacts to
-      // touch taps), and Up/Down move on instead of acting as cursor keys.
-      child: CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.select): _openScopedSearch,
-          const SingleActivator(LogicalKeyboardKey.enter): _openScopedSearch,
-          const SingleActivator(LogicalKeyboardKey.numpadEnter):
-              _openScopedSearch,
-          const SingleActivator(LogicalKeyboardKey.gameButtonA):
-              _openScopedSearch,
-        },
-        child: Shortcuts(
-          shortcuts: const {
-            SingleActivator(LogicalKeyboardKey.arrowDown):
-                DirectionalFocusIntent(TraversalDirection.down),
-            SingleActivator(LogicalKeyboardKey.arrowUp):
-                DirectionalFocusIntent(TraversalDirection.up),
-          },
-          child: TextField(
+      // TV remote: the field itself never takes focus (a focused text field
+      // hands the remote's keys to the keyboard, so OK did nothing); a plain
+      // focusable box around it does, and OK/click opens search.
+      child: _TvSearchBox(
+        onOpen: _openScopedSearch,
+        child: TextField(
+        canRequestFocus: !PlayerController.tvMode,
         controller: _searchController,
         readOnly: true,
         onTap: _openScopedSearch,
@@ -233,7 +222,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ),
       ),
-        ),
       ),
     );
   }
@@ -890,6 +878,55 @@ class _FilterPill extends StatelessWidget {
               fontSize: 15,
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// TV: a focusable box around Home's read-only search field; OK or a click
+/// opens search. Phones get the field as-is.
+class _TvSearchBox extends StatefulWidget {
+  const _TvSearchBox({required this.onOpen, required this.child});
+
+  final VoidCallback onOpen;
+  final Widget child;
+
+  @override
+  State<_TvSearchBox> createState() => _TvSearchBoxState();
+}
+
+class _TvSearchBoxState extends State<_TvSearchBox> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!PlayerController.tvMode) return widget.child;
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (node, e) {
+        if (e is KeyDownEvent &&
+            (e.logicalKey == LogicalKeyboardKey.select ||
+                e.logicalKey == LogicalKeyboardKey.enter ||
+                e.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                e.logicalKey == LogicalKeyboardKey.gameButtonA)) {
+          widget.onOpen();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onOpen,
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(Radii.pill),
+            border: _focused
+                ? Border.all(color: AppColors.accent, width: 2.5)
+                : null,
+          ),
+          child: IgnorePointer(child: widget.child),
         ),
       ),
     );

@@ -78,6 +78,9 @@ class PlayerController extends ChangeNotifier {
 
   static const _tag = 'PlayerController';
 
+  /// Set once at start-up on Android TV (see TheOttDealsApp).
+  static bool tvMode = false;
+
   /// The one controller allowed to be playing, app-wide. A new playback
   /// stops the previous owner outright — audio and provider connection —
   /// rather than queueing behind it. Without this, a player that outlived
@@ -164,11 +167,19 @@ class PlayerController extends ChangeNotifier {
     _player = player;
     _videoController = VideoController(
       player,
-      configuration: const VideoControllerConfiguration(
-        // Do NOT remove without confirming hardware decode actually renders
-        // on real hardware first — see CLAUDE.md.
-        hwdec: 'no',
-        enableHardwareAcceleration: false,
+      configuration: VideoControllerConfiguration(
+        // Phones: software decode. Do NOT change without confirming hardware
+        // decode actually renders on real hardware first — see CLAUDE.md.
+        // Android TV: the box's CPU is too weak to software-decode live
+        // streams smoothly (channels stuttered), so it decodes on the
+        // hardware chip but copies frames back ('-copy'), keeping the same
+        // proven software render path — not the direct surface path that
+        // gave a black frame on the phone.
+        hwdec: tvMode ? 'mediacodec-copy' : 'no',
+        // TV: draw frames on the GPU too — software drawing is what made
+        // live video judder while the audio was fine. If a TV model ever
+        // shows a black picture with sound, this line is the first suspect.
+        enableHardwareAcceleration: tvMode,
       ),
     );
     _attachListeners(player);

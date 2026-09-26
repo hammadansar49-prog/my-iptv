@@ -74,6 +74,10 @@ slow/unstable connection.
   decoding. This was added because hardware decoding produced a black frame with audio still
   playing on a real test device (not just an emulator) — a known media_kit/Android issue. Don't
   remove it without confirming hardware decode actually renders on real hardware first.
+- **Android TV decoding**: TV only (`PlayerController.tvMode`, set from `isTvProvider`) uses
+  `hwdec: 'mediacodec-copy'` + `enableHardwareAcceleration: true` — the box's CPU could not
+  software-decode/draw live streams (video juddered, audio fine). Phones keep `hwdec: 'no'`. If a TV
+  shows a black picture with sound, revert the TV branch first.
 - **Resume (Android)** does NOT use `Media(start:)`: on the real panel, opening at an offset made
   mpv treat the movie as an unseekable stream with no duration that played from 0:00 (reproduced
   on-device). `PlayerController` opens normally and seeks to `_pendingStart` once the duration is

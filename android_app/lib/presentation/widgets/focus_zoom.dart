@@ -67,7 +67,11 @@ class _FocusZoomState extends State<FocusZoom> {
       onEnter: (_) => _hovered = true,
       onHover: (_) {
         _hovered = true;
-        if (FocusZoom._active.value != this) _claim();
+        if (FocusZoom._active.value != this) {
+          _claim();
+          // Same tick as the remote, once per newly selected poster.
+          SystemSound.play(SystemSoundType.click);
+        }
       },
       onExit: (_) {
         _hovered = false;

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/routes.dart';
 import '../../core/theme/app_colors.dart';
+import '../providers.dart';
 import 'license_state.dart';
 
 /// Licence-key input in the login screen's card style: icon, small-caps
@@ -296,7 +297,10 @@ class _LicenseBadgeState extends ConsumerState<LicenseBadge> {
       );
     }
 
-    return Semantics(
+    // Android TV: the countdown/days must be readable from the sofa, so
+    // the whole badge (text and icon) is drawn larger there.
+    final tv = ref.watch(isTvProvider);
+    final badge = Semantics(
       button: true,
       label: '$title ${detail ?? ''}, view plans',
       child: GestureDetector(
@@ -314,7 +318,7 @@ class _LicenseBadgeState extends ConsumerState<LicenseBadge> {
                 status.isTrial
                     ? Icons.bolt_rounded
                     : Icons.workspace_premium_rounded,
-                size: 16,
+                size: tv ? 28 : 16,
                 color: fg,
               ),
               const SizedBox(width: 4),
@@ -348,6 +352,16 @@ class _LicenseBadgeState extends ConsumerState<LicenseBadge> {
             ],
           ),
         ),
+      ),
+    );
+    if (!tv) return badge;
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        textScaler: const TextScaler.linear(1.9),
+      ),
+      child: IconTheme.merge(
+        data: const IconThemeData(size: 28),
+        child: badge,
       ),
     );
   }
